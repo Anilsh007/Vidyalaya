@@ -5,12 +5,12 @@ import {
   ClipboardList,
   FileBadge2,
   IndianRupee,
-  ShieldCheck
+  ShieldCheck,
+  Users
 } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Dialog } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { db } from "@/lib/db";
@@ -20,47 +20,28 @@ import { isNoticeVisibleToSession, noticeTypeTone } from "@/lib/notices";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/utils";
 
-const quickLinks = [
-  {
-    title: "Audit activity center",
-    note: "Phase 26 adds searchable activity logs for logins, record changes, finance actions, documents, and academic operations."
-  },
-  {
-    title: "Document center",
-    note: "Phase 25 adds school, student, staff, and user document references with owner filters and archive controls."
-  },
-  {
-    title: "Staff register",
-    note: "Phase 24 adds employee profiles, teaching and non-teaching filters, contact lookup, and archive controls."
-  },
-  {
-    title: "Student register",
-    note: "Admissions, profile editing, guardian links, and archive controls are now active."
-  },
-  {
-    title: "Attendance workspace",
-    note: "Mark daily class attendance, review class-wise reports, and track monthly summaries."
-  },
-  {
-    title: "Exams and report cards",
-    note: "Exam setup, marks entry, grading, result summaries, and printable report cards are now active."
-  }
-];
-
 export default async function DashboardPage() {
   const session = await getRequiredSession();
-
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
   const todayEnd = new Date();
   todayEnd.setUTCHours(23, 59, 59, 999);
 
+  const canViewStudents = hasPermission(session, PERMISSIONS.viewStudents);
+  const canViewStaff = hasPermission(session, PERMISSIONS.viewStaff);
+  const canViewDocuments = hasPermission(session, PERMISSIONS.viewDocuments);
+  const canViewAttendance = hasPermission(session, PERMISSIONS.viewAttendance);
+  const canViewExams = hasPermission(session, PERMISSIONS.viewExams);
+  const canManageFees = hasPermission(session, PERMISSIONS.manageFees);
+  const canViewAudit = hasPermission(session, PERMISSIONS.viewAuditLogs);
+  const canViewReports = hasPermission(session, PERMISSIONS.viewReports);
+  const canManageNotices = hasPermission(session, PERMISSIONS.manageNotices);
+
   const [
+    latestNotices,
     studentCount,
     staffCount,
-    noticeCount,
     invoiceAggregate,
-    latestNotices,
     todayAttendanceCount,
     todayPresentCount,
     todayAbsentCount,
@@ -68,83 +49,94 @@ export default async function DashboardPage() {
     totalOutstandingAggregate,
     documentCount,
     auditCount,
-    examCount,
     resultCount
-  ] =
-    await Promise.all([
-      db.student.count({ where: { schoolId: session.schoolId } }),
-      db.staff.count({ where: { schoolId: session.schoolId } }),
-      db.notice.count({ where: { schoolId: session.schoolId } }),
-      db.feeInvoice.aggregate({
-        where: { schoolId: session.schoolId },
-        _sum: { totalAmount: true, paidAmount: true }
-      }),
-      db.notice.findMany({
-        where: {
-          schoolId: session.schoolId,
-          isPublished: true
-        },
-        orderBy: [{ noticeType: "desc" }, { publishedAt: "desc" }],
-        take: 12
-      }),
-      db.attendance.count({
-        where: {
-          schoolId: session.schoolId,
-          date: {
-            gte: todayStart,
-            lte: todayEnd
+  ] = await Promise.all([
+    db.notice.findMany({
+      where: {
+        schoolId: session.schoolId,
+        isPublished: true
+      },
+      orderBy: [{ noticeType: "desc" }, { publishedAt: "desc" }],
+      take: 12
+    }),
+    canViewStudents ? db.student.count({ where: { schoolId: session.schoolId } }) : Promise.resolve(null),
+    canViewStaff ? db.staff.count({ where: { schoolId: session.schoolId } }) : Promise.resolve(null),
+    canManageFees
+      ? db.feeInvoice.aggregate({
+          where: { schoolId: session.schoolId },
+          _sum: { totalAmount: true, paidAmount: true }
+        })
+      : Promise.resolve(null),
+    canViewAttendance
+      ? db.attendance.count({
+          where: {
+            schoolId: session.schoolId,
+            date: {
+              gte: todayStart,
+              lte: todayEnd
+            }
           }
-        }
-      }),
-      db.attendance.count({
-        where: {
-          schoolId: session.schoolId,
-          status: "PRESENT",
-          date: {
-            gte: todayStart,
-            lte: todayEnd
+        })
+      : Promise.resolve(null),
+    canViewAttendance
+      ? db.attendance.count({
+          where: {
+            schoolId: session.schoolId,
+            status: "PRESENT",
+            date: {
+              gte: todayStart,
+              lte: todayEnd
+            }
           }
-        }
-      }),
-      db.attendance.count({
-        where: {
-          schoolId: session.schoolId,
-          status: "ABSENT",
-          date: {
-            gte: todayStart,
-            lte: todayEnd
+        })
+      : Promise.resolve(null),
+    canViewAttendance
+      ? db.attendance.count({
+          where: {
+            schoolId: session.schoolId,
+            status: "ABSENT",
+            date: {
+              gte: todayStart,
+              lte: todayEnd
+            }
           }
-        }
-      }),
-      db.feePayment.aggregate({
-        where: {
-          schoolId: session.schoolId,
-          paymentDate: {
-            gte: todayStart,
-            lte: todayEnd
-          }
-        },
-        _sum: { amount: true }
-      }),
-      db.feeInvoice.aggregate({
-        where: { schoolId: session.schoolId },
-        _sum: { totalAmount: true, paidAmount: true }
-      }),
-      db.document.count({
-        where: { schoolId: session.schoolId, isArchived: false }
-      }),
-      db.auditLog.count({
-        where: { schoolId: session.schoolId }
-      }),
-      db.exam.count({
-        where: { schoolId: session.schoolId }
-      }),
-      db.examResult.count({
-        where: { exam: { schoolId: session.schoolId } }
-      })
-    ]);
+        })
+      : Promise.resolve(null),
+    canManageFees
+      ? db.feePayment.aggregate({
+          where: {
+            schoolId: session.schoolId,
+            paymentDate: {
+              gte: todayStart,
+              lte: todayEnd
+            }
+          },
+          _sum: { amount: true }
+        })
+      : Promise.resolve(null),
+    canManageFees
+      ? db.feeInvoice.aggregate({
+          where: { schoolId: session.schoolId },
+          _sum: { totalAmount: true, paidAmount: true }
+        })
+      : Promise.resolve(null),
+    canViewDocuments
+      ? db.document.count({
+          where: { schoolId: session.schoolId, isArchived: false }
+        })
+      : Promise.resolve(null),
+    canViewAudit
+      ? db.auditLog.count({
+          where: { schoolId: session.schoolId }
+        })
+      : Promise.resolve(null),
+    canViewExams
+      ? db.examResult.count({
+          where: { exam: { schoolId: session.schoolId } }
+        })
+      : Promise.resolve(null)
+  ]);
 
-  const canViewReports = hasPermission(session, PERMISSIONS.viewReports);
   const visibleNotices = latestNotices
     .filter((notice) => isNoticeVisibleToSession(notice, session.roles))
     .sort((a, b) => {
@@ -154,14 +146,82 @@ export default async function DashboardPage() {
       return a.noticeType === "IMPORTANT" ? -1 : 1;
     })
     .slice(0, 5);
-  const totalBilled = Number(invoiceAggregate._sum.totalAmount ?? 0);
-  const totalPaid = Number(invoiceAggregate._sum.paidAmount ?? 0);
-  const todayCollection = Number(todayCollectionAmount._sum.amount ?? 0);
+
+  const totalBilled = Number(invoiceAggregate?._sum.totalAmount ?? 0);
+  const totalPaid = Number(invoiceAggregate?._sum.paidAmount ?? 0);
+  const todayCollection = Number(todayCollectionAmount?._sum.amount ?? 0);
   const totalOutstanding = Math.max(
     0,
-    Number(totalOutstandingAggregate._sum.totalAmount ?? 0) -
-      Number(totalOutstandingAggregate._sum.paidAmount ?? 0)
+    Number(totalOutstandingAggregate?._sum.totalAmount ?? 0) -
+      Number(totalOutstandingAggregate?._sum.paidAmount ?? 0)
   );
+
+  const metricCards = [
+    canViewStudents && studentCount !== null
+      ? {
+          icon: <ClipboardList className="h-5 w-5" />,
+          label: "Students",
+          value: studentCount.toString()
+        }
+      : null,
+    canViewStaff && staffCount !== null
+      ? {
+          icon: <Users className="h-5 w-5" />,
+          label: "Staff",
+          value: staffCount.toString()
+        }
+      : null,
+    canManageFees
+      ? {
+          icon: <IndianRupee className="h-5 w-5" />,
+          label: "Fees collected",
+          value: formatCurrency(totalPaid)
+        }
+      : null,
+    canViewAttendance && todayAttendanceCount !== null
+      ? {
+          icon: <CalendarCheck2 className="h-5 w-5" />,
+          label: "Attendance today",
+          value: todayAttendanceCount.toString()
+        }
+      : null,
+    canViewDocuments && documentCount !== null
+      ? {
+          icon: <FileBadge2 className="h-5 w-5" />,
+          label: "Documents",
+          value: documentCount.toString()
+        }
+      : null,
+    canViewExams && resultCount !== null
+      ? {
+          icon: <BarChart3 className="h-5 w-5" />,
+          label: "Results published",
+          value: resultCount.toString()
+        }
+      : null
+  ].filter(Boolean) as Array<{ icon: ReactNode; label: string; value: string }>;
+
+  const summaryRows = [
+    { label: "Active roles", value: session.roles.join(", ") || "No role assigned" },
+    {
+      label: "Reports access",
+      value: canViewReports ? "Allowed for this account" : "Not granted for this account"
+    },
+    { label: "Visible notices", value: visibleNotices.length.toString() },
+    canManageNotices ? { label: "Notice workspace", value: "Manage access available" } : null,
+    canManageFees ? { label: "Invoices raised", value: formatCurrency(totalBilled) } : null,
+    canViewAttendance && todayPresentCount !== null && todayAbsentCount !== null
+      ? {
+          label: "Present today",
+          value: `${todayPresentCount} present, ${todayAbsentCount} absent`
+        }
+      : null,
+    canManageFees ? { label: "Collected today", value: formatCurrency(todayCollection) } : null,
+    canManageFees ? { label: "Outstanding dues", value: formatCurrency(totalOutstanding) } : null,
+    canViewAudit && auditCount !== null ? { label: "Audit entries", value: auditCount.toString() } : null
+  ].filter(Boolean) as Array<{ label: string; value: string }>;
+
+  const hasSchoolWideAccess = metricCards.length > 0;
 
   return (
     <div className="grid gap-5">
@@ -169,87 +229,58 @@ export default async function DashboardPage() {
         <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-950 text-white shadow-panel">
           <div className="grid gap-5 bg-[linear-gradient(135deg,#0f172a_0%,#1d3b8b_100%)] px-5 py-6 sm:px-6">
             <div className="grid gap-3">
-              <p className="text-xs uppercase tracking-[0.14em] text-blue-200">
-                Phase 26 operations
-              </p>
               <h2 className="max-w-3xl text-balance text-2xl font-semibold leading-tight">
-                The ERP now covers audit visibility, document records, staff records, school setup, student records, and day-to-day academic operations.
+                {hasSchoolWideAccess
+                  ? "Your dashboard now reflects the permissions granted to this account."
+                  : "Your account is active. This dashboard shows only the areas allowed for your role."}
               </h2>
               <p className="max-w-3xl text-sm leading-6 text-blue-100">
-                This screen stays operational, not promotional. It gives staff a fast starting point
-                for activity review, document lookup, staff records, admissions, daily attendance, finance visibility, and exam workflows.
+                {hasSchoolWideAccess
+                  ? "Counts and shortcuts below are now permission-aware, so users only see school-wide data for the modules they are allowed to access."
+                  : "If more modules are needed for this role, an administrator can update the assigned permissions and the next request will use the latest access rules."}
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricCard
-                icon={<ClipboardList className="h-5 w-5" />}
-                label="Students"
-                value={studentCount.toString()}
-              />
-              <MetricCard
-                icon={<BookOpenCheck className="h-5 w-5" />}
-                label="Staff"
-                value={staffCount.toString()}
-              />
-              <MetricCard
-                icon={<IndianRupee className="h-5 w-5" />}
-                label="Fees collected"
-                value={formatCurrency(totalPaid)}
-              />
-              <MetricCard
-                icon={<CalendarCheck2 className="h-5 w-5" />}
-                label="Attendance today"
-                value={todayAttendanceCount.toString()}
-              />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <MetricCard
-                icon={<FileBadge2 className="h-5 w-5" />}
-                label="Documents"
-                value={documentCount.toString()}
-              />
-              <MetricCard
-                icon={<BarChart3 className="h-5 w-5" />}
-                label="Results published"
-                value={resultCount.toString()}
-              />
-            </div>
+            {metricCards.length ? (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {metricCards.map((card) => (
+                  <MetricCard key={card.label} icon={card.icon} label={card.label} value={card.value} />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-white/10 bg-white/10 px-4 py-4 backdrop-blur">
+                <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-white">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <p className="text-sm text-blue-100">Restricted account</p>
+                <p className="mt-1 text-base font-semibold text-white">
+                  School-wide operational metrics are hidden for this role.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Control summary</CardTitle>
             <p className="text-sm leading-6 text-slate-600">
-              Current access, finance totals, and next implementation tracks for this starter.
+              Current access summary for this signed-in account.
             </p>
           </CardHeader>
           <CardContent className="grid gap-3">
-            <InfoRow label="Active roles" value={session.roles.join(", ")} />
-            <InfoRow label="Notices published" value={noticeCount.toString()} />
-            <InfoRow label="Invoices raised" value={formatCurrency(totalBilled)} />
-            <InfoRow
-              label="Present today"
-              value={`${todayPresentCount} present, ${todayAbsentCount} absent`}
-            />
-            <InfoRow label="Collected today" value={formatCurrency(todayCollection)} />
-            <InfoRow label="Outstanding dues" value={formatCurrency(totalOutstanding)} />
-            <InfoRow label="Audit entries" value={auditCount.toString()} />
-            <InfoRow
-              label="Reports access"
-              value={canViewReports ? "Allowed for this account" : "Not yet granted"}
-            />
+            {summaryRows.map((row) => (
+              <InfoRow key={row.label} label={row.label} value={row.value} />
+            ))}
             <Dialog
-              title="What this foundation includes"
-              description="This is the first clean layer of the product so future modules can be added without rework."
-              triggerLabel="View phase scope"
+              title="How access now behaves"
+              description="Dashboard metrics, sidebar visibility, and page protection all use the same permission set."
+              triggerLabel="View access notes"
             >
               <div className="grid gap-2 text-sm text-slate-600">
-                <p>1. Next.js App Router structure with protected dashboard routes.</p>
-                <p>2. Custom credentials authentication with signed cookies and role checks.</p>
-                <p>3. Prisma schema for the core school ERP domain.</p>
-                <p>4. Docker and PostgreSQL self-hosting setup with local deployment guides.</p>
+                <p>1. Sidebar items appear only when the account has access to that workspace.</p>
+                <p>2. Dashboard metrics are hidden when the role is not allowed to view that module's data.</p>
+                <p>3. Page guards still block direct URL access when a permission is missing.</p>
+                <p>4. Session permissions are refreshed from the database on each request.</p>
               </div>
             </Dialog>
           </CardContent>
@@ -259,29 +290,9 @@ export default async function DashboardPage() {
       <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Implementation queue</CardTitle>
-            <p className="text-sm text-slate-600">
-              Recommended next tracks after the foundation installs cleanly.
-            </p>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {quickLinks.map((item) => (
-              <div
-                key={item.title}
-                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
-              >
-                <p className="font-medium text-slate-950">{item.title}</p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">{item.note}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
             <CardTitle>Recent notices</CardTitle>
             <p className="text-sm text-slate-600">
-              Seeded notices or live school notices will appear here for admins and principals.
+              Only notices visible to the current role are listed here.
             </p>
           </CardHeader>
           <CardContent>
@@ -312,42 +323,39 @@ export default async function DashboardPage() {
               </Table>
             ) : (
               <div className="grid gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-                <p>No notices have been published yet.</p>
-                <p>Create admin and principal notice workflows in the next content phase.</p>
+                <p>No notices are available for this role yet.</p>
+                <p>Admins and principals can publish audience-specific notices from the notice workspace.</p>
               </div>
             )}
           </CardContent>
         </Card>
-      </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SupportCard
-          title="Protected routes"
-          icon={<ShieldCheck className="h-5 w-5" />}
-          description="Private dashboard pages are guarded by route proxy and server-side session checks."
-        />
-        <SupportCard
-          title="Server-first data"
-          icon={<BarChart3 className="h-5 w-5" />}
-          description="Prisma access stays on the server so database credentials never reach the client."
-        />
-        <SupportCard
-          title="Reusable UI"
-          icon={<ClipboardList className="h-5 w-5" />}
-          description="Buttons, forms, tables, receipts, reports, and attendance sheets reuse the same shared patterns."
-        />
-        <SupportCard
-          title="LAN deployment"
-          icon={<IndianRupee className="h-5 w-5" />}
-          description="Docker Compose, persistent volumes, and local network guidance are included."
-        />
+        <Card>
+          <CardHeader>
+            <CardTitle>Access behavior</CardTitle>
+            <p className="text-sm text-slate-600">
+              What this account can expect when opening dashboard modules.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <AccessHint
+              title="Navigation is filtered"
+              description="The sidebar now hides modules that this account cannot open."
+              icon={<ShieldCheck className="h-5 w-5" />}
+            />
+            <AccessHint
+              title="Direct links are still protected"
+              description="Even if someone opens a saved URL manually, page guards will deny access without permission."
+              icon={<BookOpenCheck className="h-5 w-5" />}
+            />
+            <AccessHint
+              title="Role updates apply on the next request"
+              description="Permissions are rebuilt from the database whenever the user loads a new page."
+              icon={<Users className="h-5 w-5" />}
+            />
+          </CardContent>
+        </Card>
       </section>
-
-      <div className="flex justify-end">
-        <Button variant="secondary" disabled>
-          Next module coming in the following phase
-        </Button>
-      </div>
     </div>
   );
 }
@@ -381,7 +389,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SupportCard({
+function AccessHint({
   title,
   description,
   icon

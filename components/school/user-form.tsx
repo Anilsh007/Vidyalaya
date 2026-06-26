@@ -39,8 +39,8 @@ export function UserForm({
   staffOptions,
   parentOptions
 }: {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
   submitLabel: string;
   values: UserFormValues;
   staffOptions: Option[];

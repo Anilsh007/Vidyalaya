@@ -68,11 +68,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
 
   return (
     <div className="grid gap-6">
-      <PageHeader
-        eyebrow="User management"
-        title="Create login accounts"
-        description="Add accounts for staff, parents, or other school users, choose their role, set a temporary password, and automatically link the matching profile."
-      />
+
 
       {saved ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
@@ -95,10 +91,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
           </div>
         </CardHeader>
         <CardContent>
-          <UserForm
-            title="Account details"
-            description="Choose the login role, temporary password, and linked profile if one is available."
-            submitLabel="Create user"
+          <UserForm submitLabel="Create user"
             values={{
               fullName: "",
               email: "",
@@ -149,20 +142,20 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
                       staffOptions,
                       user.staffProfile
                         ? {
-                            id: user.staffProfile.id,
-                            label: user.staffProfile.fullName,
-                            meta: user.staffProfile.employeeCode
-                          }
+                          id: user.staffProfile.id,
+                          label: user.staffProfile.fullName,
+                          meta: user.staffProfile.employeeCode
+                        }
                         : null
                     );
                     const editParentOptions = mergeCurrentOption(
                       parentOptions,
                       user.parentProfile
                         ? {
-                            id: user.parentProfile.id,
-                            label: user.parentProfile.guardianName,
-                            meta: user.parentProfile.phonePrimary
-                          }
+                          id: user.parentProfile.id,
+                          label: user.parentProfile.guardianName,
+                          meta: user.parentProfile.phonePrimary
+                        }
                         : null
                     );
 
@@ -178,11 +171,10 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
                         <TD>{linkedProfile}</TD>
                         <TD>
                           <span
-                            className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                              user.isActive
+                            className={`rounded-full border px-3 py-1 text-xs font-medium ${user.isActive
                                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                                 : "border-slate-200 bg-slate-100 text-slate-600"
-                            }`}
+                              }`}
                           >
                             {user.isActive ? "Active" : "Inactive"}
                           </span>

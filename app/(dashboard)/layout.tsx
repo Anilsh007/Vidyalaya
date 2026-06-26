@@ -17,9 +17,10 @@ export default async function DashboardLayout({
 
   return (
     <AppShell
-      roleSummary={session.roles.join(", ")}
+      roleSummary={session.roles.join(", ") || "No role assigned"}
       schoolName={user?.school.name ?? "School"}
       userLabel={user?.fullName ?? "Staff account"}
+      permissions={session.permissions}
     >
       {children}
     </AppShell>

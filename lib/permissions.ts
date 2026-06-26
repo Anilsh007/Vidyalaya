@@ -14,31 +14,30 @@ export const PERMISSIONS = {
   manageFees: "fees.manage",
   viewReports: "reports.view",
   manageNotices: "notices.manage",
-  viewAuditLogs: "audit.view"
+  viewAuditLogs: "audit.view",
+  viewAccounts: "accounts.view",
+  manageAccounts: "accounts.manage",
+  viewPayroll: "payroll.view",
+  managePayroll: "payroll.manage",
+  viewLeaves: "leaves.view",
+  manageLeaves: "leaves.manage",
+  viewLibrary: "library.view",
+  manageLibrary: "library.manage",
+  viewInventory: "inventory.view",
+  manageInventory: "inventory.manage",
+  viewTransport: "transport.view",
+  manageTransport: "transport.manage",
+  viewHostel: "hostel.view",
+  manageHostel: "hostel.manage"
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
+const ALL_PERMISSIONS = Object.values(PERMISSIONS) as PermissionKey[];
+
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
-  SUPER_ADMIN: Object.values(PERMISSIONS),
-  ADMIN: [
-    PERMISSIONS.manageSchoolSettings,
-    PERMISSIONS.manageUsers,
-    PERMISSIONS.viewStaff,
-    PERMISSIONS.manageStaff,
-    PERMISSIONS.viewStudents,
-    PERMISSIONS.manageStudents,
-    PERMISSIONS.viewDocuments,
-    PERMISSIONS.manageDocuments,
-    PERMISSIONS.viewAttendance,
-    PERMISSIONS.manageAttendance,
-    PERMISSIONS.viewExams,
-    PERMISSIONS.manageExams,
-    PERMISSIONS.manageFees,
-    PERMISSIONS.viewReports,
-    PERMISSIONS.manageNotices,
-    PERMISSIONS.viewAuditLogs
-  ],
+  SUPER_ADMIN: ALL_PERMISSIONS,
+  ADMIN: ALL_PERMISSIONS,
   PRINCIPAL: [
     PERMISSIONS.viewStaff,
     PERMISSIONS.viewStudents,
@@ -48,7 +47,21 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     PERMISSIONS.viewExams,
     PERMISSIONS.manageExams,
     PERMISSIONS.viewReports,
-    PERMISSIONS.manageNotices
+    PERMISSIONS.manageNotices,
+    PERMISSIONS.viewAccounts,
+    PERMISSIONS.manageAccounts,
+    PERMISSIONS.viewPayroll,
+    PERMISSIONS.managePayroll,
+    PERMISSIONS.viewLeaves,
+    PERMISSIONS.manageLeaves,
+    PERMISSIONS.viewLibrary,
+    PERMISSIONS.manageLibrary,
+    PERMISSIONS.viewInventory,
+    PERMISSIONS.manageInventory,
+    PERMISSIONS.viewTransport,
+    PERMISSIONS.manageTransport,
+    PERMISSIONS.viewHostel,
+    PERMISSIONS.manageHostel
   ],
   TEACHER: [
     PERMISSIONS.viewStaff,
@@ -57,9 +70,29 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     PERMISSIONS.viewAttendance,
     PERMISSIONS.manageAttendance,
     PERMISSIONS.viewExams,
-    PERMISSIONS.manageExams
+    PERMISSIONS.manageExams,
+    PERMISSIONS.viewAccounts,
+    PERMISSIONS.viewPayroll,
+    PERMISSIONS.viewLeaves,
+    PERMISSIONS.viewLibrary,
+    PERMISSIONS.viewInventory,
+    PERMISSIONS.viewTransport,
+    PERMISSIONS.viewHostel
   ],
-  ACCOUNTANT: [PERMISSIONS.viewDocuments, PERMISSIONS.manageFees, PERMISSIONS.viewReports],
+  ACCOUNTANT: [
+    PERMISSIONS.viewDocuments,
+    PERMISSIONS.manageFees,
+    PERMISSIONS.viewReports,
+    PERMISSIONS.viewAccounts,
+    PERMISSIONS.manageAccounts,
+    PERMISSIONS.viewPayroll,
+    PERMISSIONS.managePayroll,
+    PERMISSIONS.viewLeaves,
+    PERMISSIONS.viewInventory,
+    PERMISSIONS.manageInventory,
+    PERMISSIONS.viewTransport,
+    PERMISSIONS.viewHostel
+  ],
   STUDENT: [],
   PARENT: []
 };

@@ -17,4 +17,3 @@ export async function requirePermission(permission: string) {
   }
   return session;
 }
-

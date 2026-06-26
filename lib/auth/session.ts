@@ -48,6 +48,52 @@ async function verifySignature(payload: string, signature: string) {
   );
 }
 
+async function buildUserSession(userId: string, expiresAt?: number) {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    include: {
+      roles: {
+        include: {
+          role: {
+            include: {
+              permissions: {
+                include: {
+                  permission: true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!user || !user.isActive) {
+    return null;
+  }
+
+  const roles = user.roles.map((entry) => entry.role.code);
+  const permissions = Array.from(
+    new Set(
+      user.roles.flatMap((entry) =>
+        entry.role.permissions.map((permission) => permission.permission.code)
+      )
+    )
+  );
+
+  return {
+    userId: user.id,
+    schoolId: user.schoolId,
+    roles,
+    permissions,
+    expiresAt: expiresAt ?? Date.now() + 1000 * 60 * 60 * 10
+  } satisfies AppSession;
+}
+
+async function hydrateSession(session: AppSession) {
+  return buildUserSession(session.userId, session.expiresAt);
+}
+
 export async function createSessionCookieValue(session: AppSession) {
   const payload = toBase64Url(JSON.stringify(session));
   const signature = await signPayload(payload);
@@ -80,48 +126,7 @@ export async function parseSessionCookie(value: string | undefined) {
 }
 
 export async function createUserSession(userId: string) {
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    include: {
-      school: true,
-      roles: {
-        include: {
-          role: {
-            include: {
-              permissions: {
-                include: {
-                  permission: true
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  });
-
-  if (!user || !user.isActive) {
-    return null;
-  }
-
-  const roles = user.roles.map((entry) => entry.role.code);
-  const permissions = Array.from(
-    new Set(
-      user.roles.flatMap((entry) =>
-        entry.role.permissions.map((permission) => permission.permission.code)
-      )
-    )
-  );
-
-  const session: AppSession = {
-    userId: user.id,
-    schoolId: user.schoolId,
-    roles,
-    permissions,
-    expiresAt: Date.now() + 1000 * 60 * 60 * 10
-  };
-
-  return session;
+  return buildUserSession(userId);
 }
 
 export async function saveSession(session: AppSession) {
@@ -143,7 +148,13 @@ export async function clearSession() {
 
 export async function getOptionalSession() {
   const cookieStore = await cookies();
-  return parseSessionCookie(cookieStore.get(env.SESSION_COOKIE_NAME)?.value);
+  const parsed = await parseSessionCookie(cookieStore.get(env.SESSION_COOKIE_NAME)?.value);
+
+  if (!parsed) {
+    return null;
+  }
+
+  return hydrateSession(parsed);
 }
 
 export async function getRequiredSession() {

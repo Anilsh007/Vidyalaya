@@ -1,3 +1,5 @@
+import { type PermissionKey, PERMISSIONS } from "@/lib/permissions";
+
 export const APP_NAME = "Vidyalaya";
 
 export const APP_DESCRIPTION =
@@ -5,23 +7,33 @@ export const APP_DESCRIPTION =
 
 export const APP_TAGLINE = "Operate academics, fees, and records from one local-first dashboard.";
 
-export const NAV_ITEMS: ReadonlyArray<{
+export type NavItem = {
   href: string;
   label: string;
   disabled?: boolean;
-}> = [
+  permission?: PermissionKey;
+};
+
+export const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard/staff", label: "Staff" },
-  { href: "/dashboard/users", label: "Users" },
-  { href: "/dashboard/students", label: "Students" },
-  { href: "/dashboard/documents", label: "Documents" },
-  { href: "/dashboard/attendance", label: "Attendance" },
-  { href: "/dashboard/fees", label: "Fees" },
-  { href: "/dashboard/exams", label: "Exams" },
-  { href: "/dashboard/notices", label: "Notices" },
-  { href: "/dashboard/reports", label: "Reports" },
-  { href: "/dashboard/audit", label: "Audit" },
-  { href: "/dashboard/settings", label: "Settings" }
+  { href: "/dashboard/staff", label: "Staff", permission: PERMISSIONS.viewStaff },
+  { href: "/dashboard/users", label: "Users", permission: PERMISSIONS.manageUsers },
+  { href: "/dashboard/students", label: "Students", permission: PERMISSIONS.viewStudents },
+  { href: "/dashboard/documents", label: "Documents", permission: PERMISSIONS.viewDocuments },
+  { href: "/dashboard/attendance", label: "Attendance", permission: PERMISSIONS.viewAttendance },
+  { href: "/dashboard/fees", label: "Fees", permission: PERMISSIONS.manageFees },
+  { href: "/dashboard/exams", label: "Exams", permission: PERMISSIONS.viewExams },
+  { href: "/dashboard/notices", label: "Notices", permission: PERMISSIONS.manageNotices },
+  { href: "/dashboard/reports", label: "Reports", permission: PERMISSIONS.viewReports },
+  { href: "/dashboard/accounts", label: "Accounts", permission: PERMISSIONS.viewAccounts },
+  { href: "/dashboard/payroll", label: "Payroll", permission: PERMISSIONS.viewPayroll },
+  { href: "/dashboard/leaves", label: "Leaves", permission: PERMISSIONS.viewLeaves },
+  { href: "/dashboard/library", label: "Library", permission: PERMISSIONS.viewLibrary },
+  { href: "/dashboard/inventory", label: "Inventory", permission: PERMISSIONS.viewInventory },
+  { href: "/dashboard/transport", label: "Transport", permission: PERMISSIONS.viewTransport },
+  { href: "/dashboard/hostel", label: "Hostel", permission: PERMISSIONS.viewHostel },
+  { href: "/dashboard/audit", label: "Audit", permission: PERMISSIONS.viewAuditLogs },
+  { href: "/dashboard/settings", label: "Settings", permission: PERMISSIONS.manageSchoolSettings }
 ];
 
 export const LOGIN_COPY = {
