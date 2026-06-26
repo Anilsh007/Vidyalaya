@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Vidyalaya Self-Hosted Setup
 
 Vidyalaya is designed to run on the school's own computer or server. It does not require paid hosting. A school can use it on one office PC, on a small local server, or across the school LAN.
@@ -445,3 +446,6 @@ For a real school office:
 3. Back up daily
 4. Change admin credentials before launch
 5. Add Cloudflare Tunnel only if remote access is really needed
+=======
+# Vidyalaya
+>>>>>>> 5024f584b6f1f58de65e655a096589f081067aaa

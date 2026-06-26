@@ -45,6 +45,7 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const currentItem = useMemo(
     () =>
@@ -56,6 +57,7 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
 
   useEffect(() => {
     setMenuOpen(false);
+    setMounted(true);
   }, [pathname]);
 
   return (
@@ -143,7 +145,7 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
 
           {/* ===== FLEXBOX STICKY BOTTOM USER SECTION WITH INDIGO ENHANCEMENT ===== */}
           <div className="border-t rounded-b-xl border-slate-800/60 bg-slate-900 shrink-0 relative">
-            <button  type="button"  onClick={() => setProfileOpen((prev) => !prev)}  className={cn("flex items-center rounded-b-xl w-full text-slate-200 bg-slate-950/60 p-2.5 shadow-md transition-all duration-200 hover:bg-indigo-950/40 hover:border-indigo-500/50",isCollapsed ? "justify-center" : "gap-3")}>
+            <button type="button" onClick={() => setProfileOpen((prev) => !prev)} className={cn("flex items-center rounded-b-xl w-full text-slate-200 bg-slate-950/60 p-2.5 shadow-md transition-all duration-200 hover:bg-indigo-950/40 hover:border-indigo-500/50", isCollapsed ? "justify-center" : "gap-3")}>
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white font-medium text-xs shadow-inner">
                 <User className="h-4 w-4" />
               </div>
@@ -159,7 +161,7 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
             {/* Dropdown Menu */}
             <div className={cn("absolute bottom-full left-2 right-2 z-50 mb-2 overflow-hidden rounded-xl border border-slate-800 bg-slate-950 shadow-2xl shadow-black/90 transition-all duration-200 ease-out origin-bottom",
               profileOpen ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-2 scale-95 opacity-0")} >
-              
+
               <div className="border-b border-slate-800/80 bg-slate-900/50 px-4 py-3 lg:hidden">
                 <p className="font-semibold text-sm text-slate-200 leading-none">{userLabel}</p>
                 <p className="mt-1.5 text-xs font-medium text-slate-400">{roleSummary}</p>
@@ -181,57 +183,61 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
         </aside>
 
         {/* Main Content Area */}
+        {mounted && (
         <div className="grid min-w-0">
           {/* Header styling - ADDED 'lg:hidden' HERE */}
-          <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur-md lg:hidden">
-            <div className="flex items-center justify-between gap-3 p-3.5 sm:px-6 lg:px-8">
+          
+            <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur-md lg:hidden">
+              <div className="flex items-center justify-between gap-3 p-3.5 sm:px-6 lg:px-8">
 
-              {/* Hamburger Button (Mobile only) */}
-              <Button variant="ghost" size="sm" className="px-2 lg:hidden text-slate-600 hover:text-slate-900 hover:bg-slate-100/80" onClick={() => setMenuOpen(true)} aria-label="Open menu" >
-                <Menu className="h-5 w-5" />
-              </Button>
+                {/* Hamburger Button (Mobile only) */}
+                <Button variant="ghost" size="sm" className="px-2 lg:hidden text-slate-600 hover:text-slate-900 hover:bg-slate-100/80" onClick={() => setMenuOpen(true)} aria-label="Open menu" >
+                  <Menu className="h-5 w-5" />
+                </Button>
 
-              {/* Right controls */}
-              <div className="flex items-center gap-3 ml-auto">
-                <div className="relative">
-                  {/* Profile trigger */}
-                  <button type="button" onClick={() => setProfileOpen((prev) => !prev)} className="flex items-center gap-2.5 rounded-xl border border-slate-200/80 bg-white px-3 py-1.5 shadow-xs transition duration-200 hover:bg-slate-50/80 hover:border-slate-300" >
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-white font-medium text-xs">
-                      <User className="h-3.5 w-3.5" />
+                {/* Right controls */}
+                <div className="flex items-center gap-3 ml-auto">
+                  <div className="relative">
+                    {/* Profile trigger */}
+                    <button type="button" onClick={() => setProfileOpen((prev) => !prev)} className="flex items-center gap-2.5 rounded-xl border border-slate-200/80 bg-white px-3 py-1.5 shadow-xs transition duration-200 hover:bg-slate-50/80 hover:border-slate-300" >
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-white font-medium text-xs">
+                        <User className="h-3.5 w-3.5" />
+                      </div>
+                      <span className="text-xs font-medium text-slate-700 hidden sm:inline-block">{userLabel}</span>
+                      <ChevronDown className={cn("h-4 w-4 text-slate-400 transition-all duration-300 ease-out",
+                        profileOpen ? "rotate-180" : "rotate-0")} />
+                    </button>
+
+                    {/* Dropdown Menu */}
+                    <div className={cn("absolute right-0 z-50 mt-2 w-64 origin-top-right overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50 transition-all duration-200 ease-out",
+                      profileOpen ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none -translate-y-2 scale-95 opacity-0")} >
+                      <div className="border-b border-slate-100 bg-slate-50/50 px-4 py-3">
+                        <p className="font-semibold text-sm text-slate-900 leading-none">{userLabel}</p>
+                        <p className="mt-1.5 text-xs font-medium text-slate-500">{roleSummary}</p>
+                      </div>
+
+                      <Link href="/dashboard/profile" className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900">
+                        <UserRound className="h-4 w-4 text-slate-400" />
+                        Profile Settings
+                      </Link>
+
+                      <form action={logoutAction}>
+                        <button type="submit" className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-rose-600 font-medium transition-colors hover:bg-rose-50/60" >
+                          <LogOut className="h-4 w-4" />
+                          Sign Out
+                        </button>
+                      </form>
                     </div>
-                    <span className="text-xs font-medium text-slate-700 hidden sm:inline-block">{userLabel}</span>
-                    <ChevronDown className={cn("h-4 w-4 text-slate-400 transition-all duration-300 ease-out",
-                      profileOpen ? "rotate-180" : "rotate-0")} />
-                  </button>
-
-                  {/* Dropdown Menu */}
-                  <div className={cn("absolute right-0 z-50 mt-2 w-64 origin-top-right overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50 transition-all duration-200 ease-out",
-                    profileOpen ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none -translate-y-2 scale-95 opacity-0")} >
-                    <div className="border-b border-slate-100 bg-slate-50/50 px-4 py-3">
-                      <p className="font-semibold text-sm text-slate-900 leading-none">{userLabel}</p>
-                      <p className="mt-1.5 text-xs font-medium text-slate-500">{roleSummary}</p>
-                    </div>
-
-                    <Link href="/dashboard/profile" className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900">
-                      <UserRound className="h-4 w-4 text-slate-400" />
-                      Profile Settings
-                    </Link>
-
-                    <form action={logoutAction}>
-                      <button type="submit" className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-rose-600 font-medium transition-colors hover:bg-rose-50/60" >
-                        <LogOut className="h-4 w-4" />
-                        Sign Out
-                      </button>
-                    </form>
                   </div>
                 </div>
-              </div>
 
-            </div>
-          </header>
+              </div>
+            </header>
+          
 
           <main className="w-full min-w-0 px-4 py-6 sm:px-6 lg:px-8 bg-slate-50/30">{children}</main>
         </div>
+        )}
       </div>
     </div>
   );
