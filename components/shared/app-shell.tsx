@@ -72,8 +72,8 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
         <div className={cn("fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs transition lg:hidden", menuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0")} onClick={() => setMenuOpen(false)} />
 
         {/* Sidebar: Pure Flexbox Implementation */}
-        <aside className={cn("fixed inset-y-0 left-0 z-50 flex flex-col border-slate-800/60 bg-slate-900 text-slate-300 shadow-xl transition-all duration-300 ease-in-out lg:sticky lg:top-1 lg:left-1 lg:h-[99dvh] rounded-xl lg:translate-x-0  lg:shadow-none", "w-[70vw] sm:w-[320px]", isCollapsed ? "lg:w-[65px]" : "lg:w-[256px] xl:w-[268px]",
-          menuOpen ? "translate-x-0" : "-translate-x-full")} >
+        <aside className={cn("fixed inset-y-0 left-0 z-50 flex flex-col border-slate-800/60 bg-slate-900 text-slate-300 shadow-xl transition-all duration-300 ease-in-out lg:sticky lg:top-1 lg:left-1 lg:h-[99dvh] rounded-xl lg:translate-x-0  lg:shadow-none", "w-[70vw] sm:w-[320px] sm:left-1 sm:h-[99dvh] sm:top-1", isCollapsed ? "lg:w-[65px]" : "lg:w-[256px] xl:w-[268px]",
+          menuOpen ? "translate-x-0" : "-translate-x-[105%]")} >
 
           {/* CENTER TOGGLE PILL */}
           <button type="button" className="hidden lg:flex absolute top-1/2 -right-3 -translate-y-1/2 z-50 h-6 w-6 items-center justify-center rounded-full border border-slate-700 bg-indigo-900 text-slate-400 hover:text-white hover:border-slate-500 shadow-md transition-all duration-300"
@@ -84,12 +84,9 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
           </button>
 
           {/* Mobile Top Header inside Sidebar */}
-          <div className="mb-2 flex items-center justify-between lg:hidden border-b border-slate-800 pb-3 p-4">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Navigation</span>
-            <Button variant="ghost" size="sm" className="rounded-full h-8 w-8 p-0 text-slate-400 hover:text-white hover:bg-slate-800" onClick={() => setMenuOpen(false)} aria-label="Close menu" >
+          <Button variant="ghost" size="sm" className="absolute right-0 bg-black rounded-full h-8 w-8 p-0 text-white hover:bg-slate-800" onClick={() => setMenuOpen(false)} aria-label="Close menu" >
               <X className="h-4 w-4" />
             </Button>
-          </div>
 
           {/* Top School Tag Container */}
           <div className="shrink-0">
@@ -183,10 +180,9 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
         </aside>
 
         {/* Main Content Area */}
-        {mounted && (
         <div className="grid min-w-0">
-          {/* Header styling - ADDED 'lg:hidden' HERE */}
-          
+          {/* Header section conditional rendering to avoid layout mismatch */}
+          {mounted && (
             <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur-md lg:hidden">
               <div className="flex items-center justify-between gap-3 p-3.5 sm:px-6 lg:px-8">
 
@@ -233,11 +229,13 @@ export function AppShell({ roleSummary, schoolName, userLabel, children }: AppSh
 
               </div>
             </header>
-          
+          )}
 
-          <main className="w-full min-w-0 px-4 py-6 sm:px-6 lg:px-8 bg-slate-50/30">{children}</main>
+          <main className="w-full min-w-0 px-4 py-6 sm:px-6 lg:px-8 bg-slate-50/30">
+            {children}
+          </main>
         </div>
-        )}
+
       </div>
     </div>
   );
