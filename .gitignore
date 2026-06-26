@@ -1,0 +1,11 @@
+.next
+node_modules
+.env
+.env.local
+coverage
+dist
+build
+*.log
+prisma/dev.db
+postgres-data
+backups

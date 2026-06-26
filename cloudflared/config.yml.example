@@ -1,0 +1,8 @@
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_ID.json
+
+ingress:
+  - hostname: erp.example-school.in
+    service: http://localhost:3000
+  - service: http_status:404
+
