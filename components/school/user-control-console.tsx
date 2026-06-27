@@ -5,17 +5,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { UserForm, type UserFormValues, type UserHandoverPayload } from "@/components/school/user-form";
+import { deleteUserAction } from "@/app/(dashboard)/dashboard/users/actions";
 import { EmptyState } from "@/components/school/empty-state";
-import { TableFrame } from "@/components/shared/dashboard-primitives";
+import { buildUserHandoverPreview, UserHandoverPanel } from "@/components/school/user-handover-panel";
+import { DetailStat, StatusBadge, TableFrame } from "@/components/shared/dashboard-primitives";
+import { SectionHeaderCard, TableActionGroup } from "@/components/shared/listing-primitives";
+import { SelectionToolbar } from "@/components/shared/selection-toolbar";
 import { useToast } from "@/components/ui/toast";
-import { CheckCircle2, Copy, MessageCircleMore, Printer, UserCog } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CheckCircle2, Copy, MessageCircleMore, Printer, Share2, UserCog } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 type Option = {
   id: string;
   label: string;
   meta?: string;
   searchText?: string;
+  category?: UserFormValues["roleCategory"];
 };
 
 type UserGridItem = {
@@ -32,15 +38,20 @@ type UserGridItem = {
   linkedProfileBadgeLabel: string;
   linkedProfileBadgeTone: "success" | "warning";
   isActive: boolean;
+  reportingManagerId: string;
+  reportingManagerName?: string | null;
   staffId: string;
   parentId: string;
   studentId: string;
   parentStudentIds: string[];
+  createdAt: string;
 };
 
 type UserControlConsoleProps = {
   users: UserGridItem[];
+  isSuperAdmin: boolean;
   createValues: UserFormValues;
+  hodOptions: Option[];
   staffOptions: Option[];
   parentOptions: Option[];
   studentOptions: Option[];
@@ -48,13 +59,24 @@ type UserControlConsoleProps = {
 
 export function UserControlConsole({
   users,
+  isSuperAdmin,
   createValues,
+  hodOptions,
   staffOptions,
   parentOptions,
   studentOptions
 }: UserControlConsoleProps) {
   const { pushToast } = useToast();
+  const router = useRouter();
+  const [isDeleting, startDeleteTransition] = useTransition();
   const [activeHandover, setActiveHandover] = useState<UserHandoverPayload | null>(null);
+  const [detailUser, setDetailUser] = useState<UserGridItem | null>(null);
+  const [showShareOptions, setShowShareOptions] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [showHandoverOptions, setShowHandoverOptions] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [showBulkShareOptions, setShowBulkShareOptions] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(true);
 
   function notify(input: { title: string; description?: string; tone: "success" | "error" | "info" }) {
     pushToast(input);
@@ -70,24 +92,26 @@ export function UserControlConsole({
   }
 
   function handleSelectUser(user: UserGridItem) {
-    setActiveHandover({
-      userId: user.id,
-      fullName: user.fullName,
-      phone: user.phone,
-      email: user.email,
-      username: user.phone || user.email,
-      roleLabel: user.roleLabel,
-      temporaryPassword: "",
-      linkedProfileType: user.studentId ? "student" : user.parentId ? "parent" : user.staffId ? "staff" : "none",
-      linkedProfileBadgeLabel: user.linkedProfileBadgeLabel,
-      linkedProfileBadgeTone: user.linkedProfileBadgeTone,
-      linkedProfileSystemId: user.linkedProfileSystemId
-    });
+    setActiveHandover(buildUserHandoverPreview(user));
     notify({
       title: "Account selected",
       description: `${user.fullName} is loaded into the handover action bar.`,
       tone: "info"
     });
+  }
+
+  function handleOpenDetails(user: UserGridItem) {
+    setDetailUser(user);
+    setShowShareOptions(false);
+    setShowEditForm(false);
+    setShowHandoverOptions(false);
+  }
+
+  function handleCloseDetails() {
+    setDetailUser(null);
+    setShowShareOptions(false);
+    setShowEditForm(false);
+    setShowHandoverOptions(false);
   }
 
   function handleCopyCredentials() {
@@ -96,60 +120,93 @@ export function UserControlConsole({
       return;
     }
 
-    if (!activeHandover.temporaryPassword) {
-      notify({
-        title: "Temporary password unavailable",
-        description: "Only newly provisioned or reset credentials can be copied securely from this screen.",
-        tone: "error"
-      });
-      return;
-    }
-
-    const text = buildCredentialMessage(activeHandover);
+    const text = activeHandover.temporaryPassword
+      ? buildCredentialMessage(activeHandover)
+      : buildHandoverSummaryMessage(activeHandover);
     navigator.clipboard.writeText(text).then(
-      () => notify({ title: "Credentials copied", description: "The credential handover text is now on the clipboard.", tone: "success" }),
-      () => notify({ title: "Clipboard failed", description: "Copy the credentials manually from the action bar.", tone: "error" })
+      () =>
+        notify({
+          title: activeHandover.temporaryPassword ? "Credentials copied" : "User summary copied",
+          description: activeHandover.temporaryPassword
+            ? "The credential handover text is now on the clipboard."
+            : "The user handover summary is now on the clipboard.",
+          tone: "success"
+        }),
+      () => notify({ title: "Clipboard failed", description: "Copy the content manually from the action bar.", tone: "error" })
     );
   }
 
-  function handleWhatsApp() {
-    if (!activeHandover) {
+  function handleCopyProfile(user: UserGridItem) {
+    const text = buildUserProfileSummary(user);
+
+    navigator.clipboard.writeText(text).then(
+      () => notify({ title: "User details copied", description: "The selected user summary is now on the clipboard.", tone: "success" }),
+      () => notify({ title: "Clipboard failed", description: "Copy the user details manually from the popup.", tone: "error" })
+    );
+  }
+
+  function toggleUserSelection(userId: string) {
+    setSelectedUserIds((current) =>
+      current.includes(userId) ? current.filter((item) => item !== userId) : [...current, userId]
+    );
+  }
+
+  function toggleAllUserSelection() {
+    setSelectedUserIds((current) => (current.length === users.length ? [] : users.map((user) => user.id)));
+  }
+
+  function handleShareAction(mode: "select" | "copy" | "whatsapp" | "print") {
+    if (!detailUser) {
+      return;
+    }
+
+    if (mode === "select") {
+      handleSelectUser(detailUser);
+      setShowHandoverOptions(true);
+      return;
+    }
+
+    if (mode === "copy") {
+      handleCopyProfile(detailUser);
+      setShowShareOptions(false);
+      return;
+    }
+
+    const handover = buildUserHandoverPreview(detailUser);
+    setActiveHandover(handover);
+
+    if (mode === "whatsapp") {
+      handleWhatsApp(handover);
+      setShowShareOptions(false);
+      return;
+    }
+
+    handlePrint(handover);
+    setShowShareOptions(false);
+  }
+
+  function handleWhatsApp(payload = activeHandover) {
+    if (!payload) {
       notify({ title: "No account selected", description: "Select or create an account before opening WhatsApp.", tone: "error" });
       return;
     }
 
-    if (!activeHandover.phone) {
-      notify({ title: "Phone number missing", description: "Add a mobile number before sending credentials via WhatsApp.", tone: "error" });
+    if (payload.temporaryPassword && payload.phone) {
+      const phone = payload.phone.replace(/\D+/g, "");
+      const message = encodeURIComponent(buildWhatsAppMessage(payload));
+      window.open(`https://wa.me/${phone}?text=${message}`, "_blank", "noopener,noreferrer");
+      notify({ title: "WhatsApp handover opened", description: "A WhatsApp handover tab has been launched for this account.", tone: "success" });
       return;
     }
 
-    if (!activeHandover.temporaryPassword) {
-      notify({
-        title: "Temporary password unavailable",
-        description: "Generate or reset a temporary password before sending a WhatsApp handover.",
-        tone: "error"
-      });
-      return;
-    }
-
-    const phone = activeHandover.phone.replace(/\D+/g, "");
-    const message = encodeURIComponent(buildWhatsAppMessage(activeHandover));
-    window.open(`https://wa.me/${phone}?text=${message}`, "_blank", "noopener,noreferrer");
-    notify({ title: "WhatsApp handover opened", description: "A WhatsApp handover tab has been launched for this account.", tone: "success" });
+    const shareText = encodeURIComponent(buildHandoverSummaryMessage(payload));
+    window.open(`https://wa.me/?text=${shareText}`, "_blank", "noopener,noreferrer");
+    notify({ title: "WhatsApp summary opened", description: "A WhatsApp share tab has been opened with the user summary.", tone: "success" });
   }
 
-  function handlePrint() {
-    if (!activeHandover) {
+  function handlePrint(payload = activeHandover) {
+    if (!payload) {
       notify({ title: "No account selected", description: "Select or create an account before printing the handover slip.", tone: "error" });
-      return;
-    }
-
-    if (!activeHandover.temporaryPassword) {
-      notify({
-        title: "Temporary password unavailable",
-        description: "Generate or reset a temporary password before printing the credential slip.",
-        tone: "error"
-      });
       return;
     }
 
@@ -159,98 +216,104 @@ export function UserControlConsole({
       return;
     }
 
-    printWindow.document.write(buildPrintMarkup(activeHandover));
+    printWindow.document.write(
+      payload.temporaryPassword ? buildPrintMarkup(payload) : buildSummaryPrintMarkup(payload.fullName, buildHandoverSummaryMessage(payload))
+    );
     printWindow.document.close();
     printWindow.focus();
   }
 
-  const activeSystemSummary = useMemo(() => {
-    if (!activeHandover?.linkedProfileSystemId) {
-      return "System ID will appear here once a verified profile sync is available.";
+  function handleBulkShare(mode: "copy" | "whatsapp" | "print") {
+    if (!selectedUsers.length) {
+      notify({ title: "No rows selected", description: "Select one or more users from the table first.", tone: "error" });
+      return;
     }
 
-    return activeHandover.linkedProfileSystemId;
-  }, [activeHandover]);
+    const bulkText = buildBulkUserSummary(selectedUsers);
+
+    if (mode === "copy") {
+      navigator.clipboard.writeText(bulkText).then(
+        () => notify({ title: "Selected users copied", description: "The selected user summaries are now on the clipboard.", tone: "success" }),
+        () => notify({ title: "Clipboard failed", description: "Copy the selected user details manually from the table.", tone: "error" })
+      );
+      return;
+    }
+
+    if (mode === "whatsapp") {
+      window.open(`https://wa.me/?text=${encodeURIComponent(bulkText)}`, "_blank", "noopener,noreferrer");
+      notify({ title: "WhatsApp share opened", description: "A WhatsApp share tab has been opened for the selected users.", tone: "success" });
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=720,height=900");
+    if (!printWindow) {
+      notify({ title: "Print window blocked", description: "Allow pop-ups for this site to print selected user summaries.", tone: "error" });
+      return;
+    }
+
+    printWindow.document.write(buildSummaryPrintMarkup("Selected Users Summary", bulkText));
+    printWindow.document.close();
+    printWindow.focus();
+  }
+
+  function handleDeleteUser(user: UserGridItem) {
+    if (!window.confirm(`Delete user "${user.fullName}" permanently? This action cannot be undone.`)) {
+      return;
+    }
+
+    startDeleteTransition(async () => {
+      const result = await deleteUserAction(user.id);
+      onDeleteResult(result, user.id);
+    });
+  }
+
+  function onDeleteResult(result: { status: string; message?: string }, deletedUserId: string) {
+    if (result.status === "success") {
+      setSelectedUserIds((current) => current.filter((id) => id !== deletedUserId));
+      setActiveHandover((current) => (current?.userId === deletedUserId ? null : current));
+      notify({
+        title: "User deleted",
+        description: result.message ?? "User account deleted successfully.",
+        tone: "success"
+      });
+      handleCloseDetails();
+      router.refresh();
+      return;
+    }
+
+    notify({
+      title: "Delete failed",
+      description: result.message ?? "Unable to delete the user account.",
+      tone: "error"
+    });
+  }
+
+  const selectedUsers = useMemo(
+    () => users.filter((user) => selectedUserIds.includes(user.id)),
+    [selectedUserIds, users]
+  );
 
   return (
     <div className="grid gap-6">
-      <Card className="border-slate-200/80 bg-slate-50/70 shadow-panel">
-        <CardHeader>
-          <CardTitle>Handover Action Bar</CardTitle>
-          <p className="text-sm leading-6 text-slate-600">
-            Keep one active account context ready for operational handover, credential printing, and WhatsApp delivery.
-          </p>
-        </CardHeader>
-        <CardContent className="grid gap-5">
-          {activeHandover ? (
-            <div className="grid gap-5 xl:grid-cols-[1.3fr_0.7fr]">
-              <div className="grid gap-4 rounded-[24px] border border-slate-200 bg-white p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="grid gap-1">
-                    <p className="text-sm font-medium text-slate-500">Active handover record</p>
-                    <h3 className="text-xl font-semibold text-slate-950">{activeHandover.fullName}</h3>
-                    <p className="text-sm text-slate-600">{activeHandover.roleLabel}</p>
-                  </div>
-                  <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${activeHandover.linkedProfileBadgeTone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
-                    {activeHandover.linkedProfileBadgeLabel}
-                  </span>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <CredentialStat label="Username" value={activeHandover.username} />
-                  <CredentialStat label="Phone" value={activeHandover.phone || "Not available"} />
-                  <CredentialStat label="Temporary password" value={activeHandover.temporaryPassword || "Not available"} />
-                  <CredentialStat label="System sync ID" value={activeSystemSummary} />
-                </div>
-              </div>
-              <div className="grid gap-3 rounded-[24px] border border-slate-200 bg-white p-5">
-                <Button onClick={handleWhatsApp}>
-                  <MessageCircleMore className="h-4 w-4" />
-                  Send via WhatsApp
-                </Button>
-                <Button variant="secondary" onClick={handlePrint}>
-                  <Printer className="h-4 w-4" />
-                  Print Slip
-                </Button>
-                <Button variant="secondary" onClick={handleCopyCredentials}>
-                  <Copy className="h-4 w-4" />
-                  Copy Credentials
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-[24px] border border-dashed border-slate-300 bg-white px-5 py-6 text-sm text-slate-600">
-              No active handover selected yet. Create a user or select an existing account from the grid below.
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-brand-700">
-              <UserCog className="h-5 w-5" />
-            </div>
-            <div className="grid gap-1">
-              <CardTitle>Create a user account</CardTitle>
-              <p className="text-sm leading-6 text-slate-600">
-                Use the tiered role selector, attach the correct operational profile, and keep one-click handover ready.
-              </p>
-            </div>
+      <div className="grid gap-4">
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setShowCreateForm((current) => !current)}>
+              {showCreateForm ? "Hide form" : "Open create form"}
+            </Button>
           </div>
-        </CardHeader>
-        <CardContent>
-          <UserForm
-            submitLabel="Create user"
-            values={createValues}
-            staffOptions={staffOptions}
-            parentOptions={parentOptions}
-            studentOptions={studentOptions}
-            onHandoverReady={setHandover}
-            onNotify={notify}
-          />
-        </CardContent>
-      </Card>
+          {showCreateForm ? (
+            <UserForm
+              submitLabel="Create user"
+              values={createValues}
+              hodOptions={hodOptions}
+              staffOptions={staffOptions}
+              parentOptions={parentOptions}
+              studentOptions={studentOptions}
+              onHandoverReady={setHandover}
+              onNotify={notify}
+            />
+          ) : null}
+        </div>
 
       <Card>
         <CardHeader>
@@ -265,8 +328,18 @@ export function UserControlConsole({
               <Table>
                 <THead>
                   <tr>
+                    <TH className="w-14">
+                      <input
+                        type="checkbox"
+                        checked={users.length > 0 && selectedUserIds.length === users.length}
+                        onChange={toggleAllUserSelection}
+                        aria-label="Select all users"
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                    </TH>
                     <TH>User</TH>
                     <TH>Role</TH>
+                    <TH>Created</TH>
                     <TH>Linked profile</TH>
                     <TH>Status</TH>
                     <TH className="text-right">Actions</TH>
@@ -274,24 +347,22 @@ export function UserControlConsole({
                 </THead>
                 <TBody>
                   {users.map((user) => {
-                    const formValues: UserFormValues = {
-                      id: user.id,
-                      fullName: user.fullName,
-                      email: user.email,
-                      phone: user.phone,
-                      roleCategory: user.roleCategory,
-                      specificRoleKey: user.specificRoleKey,
-                      status: user.isActive ? "yes" : "no",
-                      password: "",
-                      staffId: user.staffId,
-                      parentId: user.parentId,
-                      studentId: user.studentId,
-                      parentStudentIds: user.parentStudentIds,
-                      forcePasswordReset: "no"
-                    };
-
                     return (
-                      <tr key={user.id}>
+                      <tr
+                        key={user.id}
+                        className="cursor-pointer transition hover:bg-slate-50"
+                        onClick={() => handleOpenDetails(user)}
+                      >
+                        <TD>
+                          <input
+                            type="checkbox"
+                            checked={selectedUserIds.includes(user.id)}
+                            onChange={() => toggleUserSelection(user.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label={`Select ${user.fullName}`}
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                        </TD>
                         <TD>
                           <div className="grid gap-1">
                             <span className="font-medium text-slate-950">{user.fullName}</span>
@@ -299,6 +370,12 @@ export function UserControlConsole({
                           </div>
                         </TD>
                         <TD>{user.roleLabel}</TD>
+                        <TD>
+                          <div className="grid gap-1">
+                            <span className="text-sm font-medium text-slate-900">{formatDate(user.createdAt)}</span>
+                            <span className="text-xs text-slate-500">{formatTime(user.createdAt)}</span>
+                          </div>
+                        </TD>
                         <TD>
                           <div className="grid gap-2">
                             <span className="text-sm text-slate-700">{user.linkedProfileLabel}</span>
@@ -310,7 +387,10 @@ export function UserControlConsole({
                               ) : null}
                               <button
                                 type="button"
-                                onClick={() => handleSelectUser(user)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleSelectUser(user);
+                                }}
                                 className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold transition ${
                                   user.linkedProfileBadgeTone === "success"
                                     ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -324,34 +404,43 @@ export function UserControlConsole({
                           </div>
                         </TD>
                         <TD>
-                          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${user.isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
-                            {user.isActive ? "Active" : "Inactive"}
-                          </span>
+                          <StatusBadge
+                            status={user.isActive ? "Active" : "Inactive"}
+                            toneMap={{
+                              Active: "bg-emerald-50 text-emerald-700",
+                              Inactive: "bg-slate-100 text-slate-600"
+                            }}
+                          />
                         </TD>
                         <TD>
-                          <div className="flex justify-end gap-2">
-                            <Button variant="secondary" size="sm" onClick={() => handleSelectUser(user)}>
+                          <TableActionGroup>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleOpenDetails(user);
+                              }}
+                            >
                               Select
                             </Button>
-                            <Dialog
-                              title={`Edit ${user.fullName}`}
-                              description="Update the role assignment, linked profile, or account access settings."
-                              triggerLabel={user.linkedProfileBadgeTone === "warning" ? "Pair / Edit" : "Edit"}
-                              triggerClassName={user.linkedProfileBadgeTone === "warning" ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100" : undefined}
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className={
+                                user.linkedProfileBadgeTone === "warning"
+                                  ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100"
+                                  : undefined
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleOpenDetails(user);
+                                setShowEditForm(true);
+                              }}
                             >
-                              <UserForm
-                                title="Edit user"
-                                description="Keep the login record, profile coupling, and handover details aligned."
-                                submitLabel="Save changes"
-                                values={formValues}
-                                staffOptions={staffOptions}
-                                parentOptions={parentOptions}
-                                studentOptions={studentOptions}
-                                onHandoverReady={setHandover}
-                                onNotify={notify}
-                              />
-                            </Dialog>
-                          </div>
+                              {user.linkedProfileBadgeTone === "warning" ? "Pair / Edit" : "Edit"}
+                            </Button>
+                          </TableActionGroup>
                         </TD>
                       </tr>
                     );
@@ -365,18 +454,271 @@ export function UserControlConsole({
               description="Create the first login account so staff, students, or parents can sign in."
             />
           )}
+          {selectedUsers.length ? (
+            <SelectionToolbar
+              count={selectedUsers.length}
+              description="Share multiple selected user summaries together from this action bar."
+              actionLabel="Share selected"
+              onActionToggle={() => setShowBulkShareOptions((current) => !current)}
+              onClear={() => {
+                setSelectedUserIds([]);
+                setShowBulkShareOptions(false);
+              }}
+            >
+              {showBulkShareOptions ? (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Button variant="secondary" onClick={() => handleBulkShare("copy")}>
+                    <Copy className="h-4 w-4" />
+                    Copy Selected
+                  </Button>
+                  <Button variant="secondary" onClick={() => handleBulkShare("whatsapp")}>
+                    <MessageCircleMore className="h-4 w-4" />
+                    WhatsApp Selected
+                  </Button>
+                  <Button variant="secondary" onClick={() => handleBulkShare("print")}>
+                    <Printer className="h-4 w-4" />
+                    Print Selected
+                  </Button>
+                </div>
+              ) : null}
+            </SelectionToolbar>
+          ) : null}
         </CardContent>
       </Card>
+
+      <UserAccountDialog
+        user={detailUser}
+        isSuperAdmin={isSuperAdmin}
+        isDeleting={isDeleting}
+        open={Boolean(detailUser)}
+        showEditForm={showEditForm}
+        showShareOptions={showShareOptions}
+        showHandoverOptions={showHandoverOptions}
+        activeHandover={activeHandover}
+        onClose={handleCloseDetails}
+        onEditToggle={() => {
+          setShowEditForm((current) => !current);
+          setShowShareOptions(false);
+        }}
+        onShareToggle={() => {
+          setShowShareOptions((current) => !current);
+          setShowEditForm(false);
+        }}
+        onHandoverToggle={() => {
+          if (detailUser) {
+            handleSelectUser(detailUser);
+            setShowHandoverOptions((current) => !current);
+            setShowShareOptions(false);
+          }
+        }}
+        onPopupHandoverWhatsApp={() => detailUser && handleWhatsApp(buildUserHandoverPreview(detailUser))}
+        onPopupHandoverPrint={() => detailUser && handlePrint(buildUserHandoverPreview(detailUser))}
+        onPopupHandoverCopy={() => detailUser && handleCopyProfile(detailUser)}
+        onDeleteUser={() => detailUser && handleDeleteUser(detailUser)}
+        onShareAction={handleShareAction}
+        buildFormValues={(user) => ({
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          roleCategory: user.roleCategory,
+          specificRoleKey: user.specificRoleKey,
+          status: user.isActive ? "yes" : "no",
+          password: "",
+          reportingManagerId: user.reportingManagerId,
+          staffId: user.staffId,
+          parentId: user.parentId,
+          studentId: user.studentId,
+          parentStudentIds: user.parentStudentIds,
+          forcePasswordReset: "no"
+        })}
+        hodOptions={hodOptions}
+        staffOptions={staffOptions}
+        parentOptions={parentOptions}
+        studentOptions={studentOptions}
+        onHandoverReady={setHandover}
+        onNotify={notify}
+      />
     </div>
   );
 }
 
-function CredentialStat({ label, value }: { label: string; value: string }) {
+function UserAccountDialog({
+  user,
+  isSuperAdmin,
+  isDeleting,
+  open,
+  showEditForm,
+  showShareOptions,
+  showHandoverOptions,
+  activeHandover,
+  onClose,
+  onEditToggle,
+  onShareToggle,
+  onHandoverToggle,
+  onPopupHandoverWhatsApp,
+  onPopupHandoverPrint,
+  onPopupHandoverCopy,
+  onDeleteUser,
+  onShareAction,
+  buildFormValues,
+  hodOptions,
+  staffOptions,
+  parentOptions,
+  studentOptions,
+  onHandoverReady,
+  onNotify
+}: {
+  user: UserGridItem | null;
+  isSuperAdmin: boolean;
+  isDeleting: boolean;
+  open: boolean;
+  showEditForm: boolean;
+  showShareOptions: boolean;
+  showHandoverOptions: boolean;
+  activeHandover: UserHandoverPayload | null;
+  onClose: () => void;
+  onEditToggle: () => void;
+  onShareToggle: () => void;
+  onHandoverToggle: () => void;
+  onPopupHandoverWhatsApp: () => void;
+  onPopupHandoverPrint: () => void;
+  onPopupHandoverCopy: () => void;
+  onDeleteUser: () => void;
+  onShareAction: (mode: "select" | "copy" | "whatsapp" | "print") => void;
+  buildFormValues: (user: UserGridItem) => UserFormValues;
+  hodOptions: Option[];
+  staffOptions: Option[];
+  parentOptions: Option[];
+  studentOptions: Option[];
+  onHandoverReady: (payload: UserHandoverPayload) => void;
+  onNotify: (input: { title: string; description?: string; tone: "success" | "error" | "info" }) => void;
+}) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-2 text-sm font-medium text-slate-900">{value}</p>
-    </div>
+    <Dialog
+      title={user ? user.fullName : "User details"}
+      description={user ? "View account details, share the profile, or edit the same record from one popup." : undefined}
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose();
+        }
+      }}
+      widthClassName="w-[min(96vw,960px)]"
+    >
+      {user ? (
+        <div className="grid gap-6">
+          {showHandoverOptions ? (
+            <div className="grid gap-4 rounded-[26px] border border-slate-200/80 bg-slate-50/70 p-5">
+              <div className="grid gap-1">
+                <h4 className="text-2xl font-semibold tracking-tight text-slate-950">Handover Action Bar</h4>
+                <p className="text-sm leading-6 text-slate-600">
+                  Keep one active account context ready for operational handover, credential printing, and WhatsApp delivery.
+                </p>
+              </div>
+              <UserHandoverPanel
+                payload={activeHandover && activeHandover.userId === user.id ? activeHandover : buildUserHandoverPreview(user)}
+                systemSyncId={
+                  activeHandover && activeHandover.userId === user.id
+                    ? activeHandover.linkedProfileSystemId || "System ID will appear here once a verified profile sync is available."
+                    : user.linkedProfileSystemId || "System ID will appear here once a verified profile sync is available."
+                }
+                onWhatsApp={onPopupHandoverWhatsApp}
+                onPrint={onPopupHandoverPrint}
+                onCopy={onPopupHandoverCopy}
+                actionLabels={{
+                  whatsapp: "Send via WhatsApp",
+                  print: "Print Slip",
+                  copy: activeHandover?.temporaryPassword ? "Copy Credentials" : "Copy Summary"
+                }}
+              />
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="grid gap-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Account overview</p>
+                  <h4 className="text-xl font-semibold text-slate-950">{user.fullName}</h4>
+                  <p className="text-sm text-slate-600">{user.roleLabel}</p>
+                </div>
+                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${user.isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                  {user.isActive ? "Active" : "Inactive"}
+                </span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <DetailStat label="Email" value={user.email} />
+                <DetailStat label="Phone" value={user.phone || "Not available"} />
+                <DetailStat label="Created date" value={formatDate(user.createdAt)} />
+                <DetailStat label="Created time" value={formatTime(user.createdAt)} />
+              </div>
+            </div>
+            <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4">
+              <DetailStat label="Profile status" value={user.linkedProfileBadgeLabel} />
+              <DetailStat label="Linked profile" value={user.linkedProfileLabel} />
+              <DetailStat label="System ID" value={user.linkedProfileSystemId ?? "Not available"} />
+              <DetailStat label="Reporting manager" value={user.reportingManagerName ?? "Not assigned"} />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3 border-t border-slate-200 pt-4">
+            <Button variant="secondary" onClick={onHandoverToggle}>
+              Select for handover
+            </Button>
+            <Button variant="secondary" onClick={onShareToggle}>
+              <Share2 className="h-4 w-4" />
+              Share
+            </Button>
+            <Button onClick={onEditToggle}>{showEditForm ? "Hide edit" : "Edit user"}</Button>
+            {isSuperAdmin ? (
+              <Button variant="danger" onClick={onDeleteUser} disabled={isDeleting}>
+                {isDeleting ? "Deleting..." : "Delete user"}
+              </Button>
+            ) : null}
+          </div>
+
+          {showShareOptions ? (
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2 xl:grid-cols-4">
+              <Button variant="secondary" onClick={() => onShareAction("copy")}>
+                <Copy className="h-4 w-4" />
+                Copy Details
+              </Button>
+              <Button variant="secondary" onClick={() => onShareAction("select")}>
+                <CheckCircle2 className="h-4 w-4" />
+                Load To Handover
+              </Button>
+              <Button variant="secondary" onClick={() => onShareAction("whatsapp")}>
+                <MessageCircleMore className="h-4 w-4" />
+                WhatsApp
+              </Button>
+              <Button variant="secondary" onClick={() => onShareAction("print")}>
+                <Printer className="h-4 w-4" />
+                Print
+              </Button>
+            </div>
+          ) : null}
+
+          {showEditForm ? (
+            <div className="border-t border-slate-200 pt-4">
+              <UserForm
+                title="Edit user"
+                description="Keep the login record, linked profile, and department routing aligned."
+                submitLabel="Save changes"
+                values={buildFormValues(user)}
+                hodOptions={hodOptions}
+                staffOptions={staffOptions}
+                parentOptions={parentOptions}
+                studentOptions={studentOptions}
+                onHandoverReady={onHandoverReady}
+                onNotify={onNotify}
+                onSuccess={onClose}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </Dialog>
   );
 }
 
@@ -393,6 +735,55 @@ function buildCredentialMessage(payload: UserHandoverPayload) {
     "",
     "Please reset your password upon initial sign-in."
   ].join("\n");
+}
+
+function buildHandoverSummaryMessage(payload: UserHandoverPayload) {
+  return [
+    "SPRINGFIELD PUBLIC SCHOOL",
+    "",
+    `Name: ${payload.fullName}`,
+    `Role: ${payload.roleLabel}`,
+    `Username: ${payload.username}`,
+    `Phone: ${payload.phone || "Not available"}`,
+    `System ID: ${payload.linkedProfileSystemId ?? "Not available"}`,
+    "",
+    payload.temporaryPassword
+      ? `Temporary Password: ${payload.temporaryPassword}`
+      : "Temporary password is not currently cached for this account."
+  ].join("\n");
+}
+
+function buildUserProfileSummary(user: UserGridItem) {
+  return [
+    "SPRINGFIELD PUBLIC SCHOOL",
+    "",
+    `Name: ${user.fullName}`,
+    `Role: ${user.roleLabel}`,
+    `Email: ${user.email}`,
+    `Phone: ${user.phone || "Not available"}`,
+    `Status: ${user.isActive ? "Active" : "Inactive"}`,
+    `Created: ${formatDateTime(user.createdAt)}`,
+    `Profile Sync: ${user.linkedProfileBadgeLabel}`,
+    `System ID: ${user.linkedProfileSystemId ?? "Not available"}`
+  ].join("\n");
+}
+
+function buildBulkUserSummary(users: UserGridItem[]) {
+  return [
+    "SPRINGFIELD PUBLIC SCHOOL",
+    "",
+    ...users.map((user, index) =>
+      [
+        `${index + 1}. ${user.fullName}`,
+        `Role: ${user.roleLabel}`,
+        `Email: ${user.email}`,
+        `Phone: ${user.phone || "Not available"}`,
+        `Status: ${user.isActive ? "Active" : "Inactive"}`,
+        `Created: ${formatDateTime(user.createdAt)}`,
+        `System ID: ${user.linkedProfileSystemId ?? "Not available"}`
+      ].join("\n")
+    )
+  ].join("\n\n");
 }
 
 function buildWhatsAppMessage(payload: UserHandoverPayload) {
@@ -438,6 +829,30 @@ function buildPrintMarkup(payload: UserHandoverPayload) {
   return content;
 }
 
+function buildSummaryPrintMarkup(title: string, summary: string) {
+  return `<!DOCTYPE html>
+  <html>
+    <head>
+      <title>${escapeHtml(title)}</title>
+      <style>
+        body { font-family: Arial, sans-serif; background: #f8fafc; margin: 0; padding: 32px; color: #0f172a; }
+        .card { max-width: 760px; margin: 0 auto; background: white; border: 1px solid #cbd5e1; border-radius: 24px; padding: 32px; }
+        .eyebrow { color: #475569; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; }
+        h1 { margin: 12px 0 8px; font-size: 28px; }
+        pre { white-space: pre-wrap; word-break: break-word; line-height: 1.7; font-size: 14px; color: #334155; }
+        @media print { body { padding: 0; background: white; } .card { border: none; box-shadow: none; } }
+      </style>
+    </head>
+    <body onload="window.print(); window.onafterprint = () => window.close();">
+      <div class="card">
+        <div class="eyebrow">Springfield Public School</div>
+        <h1>${escapeHtml(title)}</h1>
+        <pre>${escapeHtml(summary)}</pre>
+      </div>
+    </body>
+  </html>`;
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -445,4 +860,29 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  }).format(new Date(value));
+}
+
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
 }

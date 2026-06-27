@@ -19,18 +19,23 @@ type Option = {
   label: string;
   meta?: string;
   searchText?: string;
+  category?: RoleCategory;
 };
 
 export default async function UsersPage({ searchParams }: { searchParams: SearchParams }) {
   void searchParams;
   const session = await requirePermission(PERMISSIONS.manageUsers);
 
-  const [users, allStaff, allParents, students] = await Promise.all([
+  const [users, allStaff, allParents, students, hodList] = await Promise.all([
     db.user.findMany({
       where: { schoolId: session.schoolId },
       include: {
         roles: { include: { role: true } },
-        staffProfile: true,
+        staffProfile: {
+          include: {
+            reportingManager: true
+          }
+        },
         parentProfile: {
           include: {
             students: {
@@ -47,7 +52,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
           }
         }
       },
-      orderBy: [{ fullName: "asc" }]
+      orderBy: [{ createdAt: "desc" }, { fullName: "asc" }]
     }),
     db.staff.findMany({
       where: { schoolId: session.schoolId },
@@ -77,6 +82,18 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
         section: true
       },
       orderBy: [{ fullName: "asc" }]
+    }),
+    db.staff.findMany({
+      where: {
+        schoolId: session.schoolId,
+        isArchived: false,
+        isHod: true,
+        user: { is: { isActive: true } }
+      },
+      include: {
+        user: true
+      },
+      orderBy: [{ department: "asc" }, { fullName: "asc" }]
     })
   ]);
 
@@ -99,6 +116,23 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
     label: item.fullName,
     meta: [item.admissionNumber, item.class?.name, item.section?.name].filter(Boolean).join(" | "),
     searchText: [item.fullName, item.admissionNumber, item.rollNumber, item.class?.name, item.section?.name].filter(Boolean).join(" ")
+  }));
+
+  const hodOptions: Option[] = hodList.map((item) => ({
+    id: item.id,
+    label: item.fullName,
+    meta: [item.employeeCode, item.department, item.designation].filter(Boolean).join(" | "),
+    searchText: [item.employeeCode, item.department, item.designation, item.user?.email, item.phone].filter(Boolean).join(" "),
+    category:
+      item.department === "Academics"
+        ? "ACADEMICS"
+        : item.department === "Finance"
+          ? "FINANCE"
+          : item.department === "Operations"
+            ? "OPERATIONS"
+            : item.department === "Support Staff"
+              ? "SUPPORT_STAFF"
+              : undefined
   }));
 
   const userRows = users.map((user) => {
@@ -143,10 +177,13 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
       linkedProfileBadgeLabel,
       linkedProfileBadgeTone,
       isActive: user.isActive,
+      reportingManagerId: user.staffProfile?.reportingManagerId ?? "",
+      reportingManagerName: user.staffProfile?.reportingManager?.fullName ?? null,
       staffId: user.staffProfile?.id ?? "",
       parentId: user.parentProfile?.id ?? "",
       studentId: guessedStudent?.id ?? "",
-      parentStudentIds: user.parentProfile?.students.map((entry) => entry.studentId) ?? []
+      parentStudentIds: user.parentProfile?.students.map((entry) => entry.studentId) ?? [],
+      createdAt: user.createdAt.toISOString()
     };
   });
 
@@ -160,20 +197,23 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
 
       <UserControlConsole
         users={userRows}
+        isSuperAdmin={session.roles.includes("SUPER_ADMIN")}
         createValues={{
           fullName: "",
           email: "",
           phone: "",
-          roleCategory: "ACADEMICS",
-          specificRoleKey: "TEACHER",
-          status: "yes",
+          roleCategory: "",
+          specificRoleKey: "",
+          status: "",
           password: "",
+          reportingManagerId: "",
           staffId: "",
           parentId: "",
           studentId: "",
           parentStudentIds: [],
           forcePasswordReset: "yes"
         }}
+        hodOptions={hodOptions}
         staffOptions={staffOptions}
         parentOptions={parentOptions}
         studentOptions={studentOptions}

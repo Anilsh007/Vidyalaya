@@ -53,6 +53,7 @@ type SpecificRoleDefinition = {
   linkedProfileType: UserLinkType;
   designation?: string;
   managementBypass?: boolean;
+  marksDepartmentHead?: boolean;
 };
 
 export const USER_LINK_TYPES = ["none", "staff", "parent", "student"] as const;
@@ -81,7 +82,8 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     category: "MANAGEMENT",
     roleCode: RoleCode.PRINCIPAL,
     linkedProfileType: "staff",
-    designation: "Principal"
+    designation: "Principal",
+    marksDepartmentHead: true
   },
   DIRECTOR: {
     key: "DIRECTOR",
@@ -89,7 +91,8 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     category: "MANAGEMENT",
     roleCode: RoleCode.PRINCIPAL,
     linkedProfileType: "staff",
-    designation: "Director"
+    designation: "Director",
+    marksDepartmentHead: true
   },
   TEACHER: {
     key: "TEACHER",
@@ -105,7 +108,8 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     category: "ACADEMICS",
     roleCode: RoleCode.TEACHER,
     linkedProfileType: "staff",
-    designation: "HOD"
+    designation: "HOD",
+    marksDepartmentHead: true
   },
   EXAM_CONTROLLER: {
     key: "EXAM_CONTROLLER",
@@ -129,7 +133,8 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     category: "FINANCE",
     roleCode: RoleCode.ACCOUNTANT,
     linkedProfileType: "staff",
-    designation: "Procurement Manager"
+    designation: "Procurement Manager",
+    marksDepartmentHead: true
   },
   LIBRARIAN: {
     key: "LIBRARIAN",
@@ -145,7 +150,8 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     category: "OPERATIONS",
     roleCode: RoleCode.ADMIN,
     linkedProfileType: "staff",
-    designation: "Transport Manager"
+    designation: "Transport Manager",
+    marksDepartmentHead: true
   },
   HOSTEL_WARDEN: {
     key: "HOSTEL_WARDEN",
@@ -153,7 +159,8 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     category: "OPERATIONS",
     roleCode: RoleCode.ADMIN,
     linkedProfileType: "staff",
-    designation: "Hostel Warden"
+    designation: "Hostel Warden",
+    marksDepartmentHead: true
   },
   FRONT_DESK: {
     key: "FRONT_DESK",
@@ -252,6 +259,27 @@ export function roleCodeToUserType(roleCode: RoleCode) {
   return UserType.STAFF;
 }
 
+export function departmentForRoleCategory(roleCategory: RoleCategory) {
+  const mapping: Record<RoleCategory, string> = {
+    MANAGEMENT: "Management",
+    ACADEMICS: "Academics",
+    FINANCE: "Finance",
+    OPERATIONS: "Operations",
+    SUPPORT_STAFF: "Support Staff",
+    PRIMARY_USERS: "Primary Users"
+  };
+
+  return mapping[roleCategory];
+}
+
+export function shouldShowReportingManager(roleCategory: RoleCategory) {
+  return roleCategory !== "PRIMARY_USERS" && roleCategory !== "MANAGEMENT";
+}
+
+export function specificRoleSetsDepartmentHead(roleKey: SpecificRoleKey) {
+  return SPECIFIC_ROLE_DEFINITIONS[roleKey].marksDepartmentHead ?? false;
+}
+
 export function linkedProfileTypeForRole(roleCode: RoleCode) {
   const definition = Object.values(SPECIFIC_ROLE_DEFINITIONS).find((item) => item.roleCode === roleCode);
   return definition?.linkedProfileType ?? "none";
@@ -346,6 +374,7 @@ export const userAccountSchema = z
     password: z.string().trim().optional(),
     forcePasswordReset: z.enum(["yes", "no"]).default("no"),
     linkedProfileType: z.enum(USER_LINK_TYPES),
+    reportingManagerId: z.string().optional(),
     staffId: z.string().optional(),
     parentId: z.string().optional(),
     studentId: z.string().optional(),

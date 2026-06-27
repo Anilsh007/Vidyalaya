@@ -94,7 +94,7 @@ export function AppShell({
         >
           <button
             type="button"
-            className="hidden lg:flex absolute top-1/2 -right-3 -translate-y-1/2 z-50 h-6 w-6 items-center justify-center rounded-full border border-slate-700 bg-indigo-900 text-slate-400 hover:text-white hover:border-slate-500 shadow-md transition-all duration-300"
+            className="hidden lg:flex absolute top-1/2 -right-3 -translate-y-1/2 z-50 h-6 w-6 items-center justify-center rounded-full border border-white bg-orange-600 text-white hover:text-white hover:border-slate-500 shadow-md transition-all duration-300"
             onClick={() => setIsCollapsed(!isCollapsed)}
             aria-label="Toggle sidebar"
           >

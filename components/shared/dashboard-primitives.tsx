@@ -89,3 +89,18 @@ type TableFrameProps = {
 export function TableFrame({ children, className }: TableFrameProps) {
   return <div className={cn("overflow-hidden rounded-2xl border border-slate-200", className)}>{children}</div>;
 }
+
+type DetailStatProps = {
+  label: string;
+  value: string;
+  className?: string;
+};
+
+export function DetailStat({ label, value, className }: DetailStatProps) {
+  return (
+    <div className={cn("rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3", className)}>
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <p className="mt-2 text-sm font-medium text-slate-900">{value}</p>
+    </div>
+  );
+}

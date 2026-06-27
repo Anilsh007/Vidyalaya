@@ -67,6 +67,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         newestOnTop
         theme="light"
         transition={Bounce}
+        containerStyle={{ zIndex: 100 }}
         toastClassName={() => "rounded-2xl shadow-panel backdrop-blur"}
       />
     </ToastContext.Provider>

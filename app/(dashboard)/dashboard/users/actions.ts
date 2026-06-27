@@ -10,8 +10,13 @@ import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
 import { PERMISSIONS } from "@/lib/permissions";
 import {
+  departmentForRoleCategory,
   getSpecificRoleDefinition,
+  specificRoleSetsDepartmentHead,
+  type RoleCategory,
+  type SpecificRoleKey,
   roleCodeToUserType,
+  shouldShowReportingManager,
   userAccountSchema
 } from "@/lib/user-management";
 import { getCurrentAcademicYear } from "@/lib/school";
@@ -26,6 +31,10 @@ function normalizeEmail(email: string) {
 
 function normalizePhone(phone: string | null | undefined) {
   return (phone ?? "").replace(/\D+/g, "");
+}
+
+function isSuperAdminSession(session: Awaited<ReturnType<typeof requirePermission>>) {
+  return session.roles.includes("SUPER_ADMIN");
 }
 
 async function resolveAutoLinkedIds(
@@ -79,14 +88,46 @@ async function resolveAutoLinkedIds(
   return { staffId, parentId };
 }
 
+async function validateReportingManager(
+  tx: Prisma.TransactionClient,
+  schoolId: string,
+  roleCategory: RoleCategory,
+  reportingManagerId?: string
+) {
+  if (!reportingManagerId) {
+    return null;
+  }
+
+  const reportingManager = await tx.staff.findFirst({
+    where: {
+      id: reportingManagerId,
+      schoolId,
+      isArchived: false,
+      isHod: true,
+      department: departmentForRoleCategory(roleCategory),
+      user: { is: { isActive: true } }
+    },
+    select: { id: true, fullName: true, employeeCode: true }
+  });
+
+  if (!reportingManager) {
+    throw new Error("Selected reporting manager is invalid for the chosen department.");
+  }
+
+  return reportingManager;
+}
+
 async function ensureStaffProfile(
   tx: Prisma.TransactionClient,
   schoolId: string,
   roleCode: RoleCode,
+  roleCategory: RoleCategory,
   specificRoleLabel: string,
+  specificRoleKey: SpecificRoleKey,
   fullName: string,
   email: string,
   phone: string | null,
+  reportingManagerId?: string,
   staffId?: string
 ) {
   if (staffId) {
@@ -109,11 +150,14 @@ async function ensureStaffProfile(
       employeeCode,
       fullName,
       designation: specificRoleLabel || designation,
+      department: departmentForRoleCategory(roleCategory),
+      reportingManagerId: reportingManagerId || null,
+      isHod: specificRoleSetsDepartmentHead(specificRoleKey),
       joiningDate: new Date(),
       phone,
       email,
       isTeachingStaff:
-        roleCode === RoleCode.TEACHER || roleCode === RoleCode.PRINCIPAL || specificRoleLabel === "Exam Controller"
+        roleCode === RoleCode.TEACHER || roleCode === RoleCode.PRINCIPAL || roleCategory === "ACADEMICS"
     }
   });
 
@@ -153,10 +197,13 @@ async function setLinkedProfile(
   userId: string,
   schoolId: string,
   linkedProfileType: string,
+  roleCategory: RoleCategory,
   specificRoleLabel: string,
+  specificRoleKey: SpecificRoleKey,
   accountFullName: string,
   accountEmail: string,
   accountPhone: string | null,
+  reportingManagerId?: string,
   staffId?: string,
   parentId?: string
 ) {
@@ -197,6 +244,9 @@ async function setLinkedProfile(
         userId,
         fullName: accountFullName,
         designation: specificRoleLabel || staff.designation,
+        department: departmentForRoleCategory(roleCategory),
+        reportingManagerId: reportingManagerId || null,
+        isHod: specificRoleSetsDepartmentHead(specificRoleKey),
         phone: accountPhone ?? staff.phone,
         email: accountEmail
       }
@@ -295,6 +345,7 @@ export async function saveUserAction(
     roleCategory: getString(formData, "roleCategory"),
     specificRoleKey: getString(formData, "specificRoleKey"),
     roleCode: getString(formData, "roleCode") || undefined,
+    reportingManagerId: getString(formData, "reportingManagerId") || undefined,
     status: getString(formData, "status") === "no" ? "no" : "yes",
     password: getString(formData, "password"),
     forcePasswordReset: getString(formData, "forcePasswordReset") === "yes" ? "yes" : "no",
@@ -319,6 +370,7 @@ export async function saveUserAction(
   if (!specificRole) {
     return { status: "error", message: "Selected role configuration is invalid." };
   }
+
   const roleCode = specificRole.roleCode as RoleCode;
   const linkedProfileType = specificRole.linkedProfileType;
   const specificRoleLabel = specificRole.label;
@@ -326,6 +378,7 @@ export async function saveUserAction(
   let linkedProfileBadgeLabel: string | null = null;
   let linkedProfileBadgeTone: "success" | "warning" = "warning";
   let linkedProfileSystemId: string | null = null;
+  let reportingManagerName: string | null = null;
 
   try {
     const user = await db.$transaction(async (tx) => {
@@ -336,6 +389,11 @@ export async function saveUserAction(
       if (!role) {
         throw new Error("Role was not found for this school.");
       }
+
+      const reportingManager = shouldShowReportingManager(data.roleCategory)
+        ? await validateReportingManager(tx, session.schoolId, data.roleCategory, data.reportingManagerId)
+        : null;
+      reportingManagerName = reportingManager?.fullName ?? null;
 
       if (linkedProfileType === "student" && data.studentId) {
         const studentMatch = await tx.student.findFirst({
@@ -376,10 +434,13 @@ export async function saveUserAction(
           tx,
           session.schoolId,
           roleCode,
+          data.roleCategory,
           specificRoleLabel,
+          data.specificRoleKey,
           data.fullName,
           email,
           data.phone || null,
+          reportingManager?.id,
           resolvedLinks.staffId
         );
       }
@@ -395,11 +456,7 @@ export async function saveUserAction(
 
       if (data.id) {
         const existing = await tx.user.findFirst({
-          where: { id: data.id, schoolId: session.schoolId },
-          include: {
-            staffProfile: true,
-            parentProfile: true
-          }
+          where: { id: data.id, schoolId: session.schoolId }
         });
 
         if (!existing) {
@@ -437,10 +494,13 @@ export async function saveUserAction(
           updated.id,
           session.schoolId,
           linkedProfileType,
+          data.roleCategory,
           specificRoleLabel,
+          data.specificRoleKey,
           updated.fullName,
           updated.email,
           updated.phone,
+          reportingManager?.id,
           resolvedLinks.staffId,
           resolvedLinks.parentId
         );
@@ -509,10 +569,13 @@ export async function saveUserAction(
         created.id,
         session.schoolId,
         linkedProfileType,
+        data.roleCategory,
         specificRoleLabel,
+        data.specificRoleKey,
         created.fullName,
         created.email,
         created.phone,
+        reportingManager?.id,
         resolvedLinks.staffId,
         resolvedLinks.parentId
       );
@@ -565,11 +628,14 @@ export async function saveUserAction(
         roleCode,
         specificRoleKey: data.specificRoleKey,
         specificRoleLabel,
+        roleCategory: data.roleCategory,
         isActive: data.status === "yes",
         forcePasswordReset: data.forcePasswordReset === "yes",
         studentId: data.studentId ?? null,
         studentMatchLabel,
-        parentStudentIds: data.parentStudentIds
+        parentStudentIds: data.parentStudentIds,
+        reportingManagerId: data.reportingManagerId ?? null,
+        reportingManagerName
       }
     });
 
@@ -579,6 +645,7 @@ export async function saveUserAction(
     if (data.staffId) {
       revalidatePath(`/dashboard/staff/${data.staffId}`);
     }
+
     return {
       status: "success",
       message: data.id ? "User account updated successfully." : "User account created successfully.",
@@ -598,12 +665,110 @@ export async function saveUserAction(
             linkedProfileBadgeLabel ??
             (linkedProfileType === "none" ? "Verified Sync" : "Connection Pending - Click to pair"),
           linkedProfileBadgeTone: linkedProfileType === "none" ? "success" : linkedProfileBadgeTone,
-          linkedProfileSystemId: linkedProfileSystemId ?? studentMatchLabel
+          linkedProfileSystemId: linkedProfileSystemId ?? studentMatchLabel,
+          reportingManagerName,
+          reportingManagerSynced: Boolean(reportingManagerName)
         }
       }
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save the user account.";
     return { status: "error", message };
+  }
+}
+
+export async function deleteUserAction(userId: string): Promise<ActionFormState> {
+  const session = await requirePermission(PERMISSIONS.manageUsers);
+
+  if (!isSuperAdminSession(session)) {
+    return {
+      status: "error",
+      message: "Only Super Admin can permanently delete user accounts."
+    };
+  }
+
+  if (!userId) {
+    return {
+      status: "error",
+      message: "User account not found."
+    };
+  }
+
+  if (userId === session.userId) {
+    return {
+      status: "error",
+      message: "You cannot delete your own active login."
+    };
+  }
+
+  try {
+    const target = await db.user.findFirst({
+      where: { id: userId, schoolId: session.schoolId },
+      include: {
+        roles: { include: { role: true } },
+        staffProfile: true,
+        parentProfile: true
+      }
+    });
+
+    if (!target) {
+      return {
+        status: "error",
+        message: "User account not found."
+      };
+    }
+
+    await db.$transaction(async (tx) => {
+      if (target.staffProfile?.id) {
+        await tx.staff.update({
+          where: { id: target.staffProfile.id },
+          data: { userId: null }
+        });
+      }
+
+      if (target.parentProfile?.id) {
+        await tx.parent.update({
+          where: { id: target.parentProfile.id },
+          data: { userId: null }
+        });
+      }
+
+      await tx.userRole.deleteMany({
+        where: { userId: target.id }
+      });
+
+      await tx.user.delete({
+        where: { id: target.id }
+      });
+    });
+
+    await recordAuditLog({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: "user.deleted",
+      entityType: "User",
+      entityId: target.id,
+      metadata: {
+        fullName: target.fullName,
+        email: target.email,
+        roleCodes: target.roles.map((entry) => entry.role.code),
+        staffProfileId: target.staffProfile?.id ?? null,
+        parentProfileId: target.parentProfile?.id ?? null
+      }
+    });
+
+    revalidatePath("/dashboard/users");
+    revalidatePath("/dashboard/profile");
+    revalidatePath("/dashboard/staff");
+
+    return {
+      status: "success",
+      message: "User account deleted successfully."
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to delete the user account."
+    };
   }
 }

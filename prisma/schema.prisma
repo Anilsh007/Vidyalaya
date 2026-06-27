@@ -306,6 +306,8 @@ model Staff {
   designation     String
   department      String?
   qualification   String?
+  reportingManagerId String?
+  isHod           Boolean       @default(false)
   joiningDate     DateTime
   phone           String?
   email           String?
@@ -319,12 +321,15 @@ model Staff {
   school          School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   academicYear    AcademicYear  @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
   user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  reportingManager Staff?       @relation("StaffReportingLine", fields: [reportingManagerId], references: [id], onDelete: SetNull)
+  directReports   Staff[]       @relation("StaffReportingLine")
   classTeacherFor Section[]     @relation("ClassTeacher")
   documents       Document[]
 
   @@unique([schoolId, employeeCode])
   @@index([schoolId, academicYearId, designation])
   @@index([schoolId, isArchived, isTeachingStaff])
+  @@index([schoolId, department, isHod])
 }
 
 model SchoolClass {

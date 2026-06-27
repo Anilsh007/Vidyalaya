@@ -19,8 +19,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { CheckCheck, CopyPlus, IdCard, Search, ShieldCheck, Sparkles, Users } from "lucide-react";
-import type { ReactNode } from "react";
+import { CheckCheck, CopyPlus, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { useActionState, useEffect, useMemo, useState } from "react";
 
 type Option = {
@@ -28,6 +27,7 @@ type Option = {
   label: string;
   meta?: string;
   searchText?: string;
+  category?: RoleCategory;
 };
 
 export type UserFormValues = {
@@ -35,10 +35,11 @@ export type UserFormValues = {
   fullName: string;
   email: string;
   phone: string;
-  roleCategory: RoleCategory;
-  specificRoleKey: SpecificRoleKey;
+  roleCategory: RoleCategory | "";
+  specificRoleKey: SpecificRoleKey | "";
   status: string;
   password: string;
+  reportingManagerId: string;
   staffId: string;
   parentId: string;
   studentId: string;
@@ -58,6 +59,8 @@ export type UserHandoverPayload = {
   linkedProfileBadgeLabel: string;
   linkedProfileBadgeTone: "success" | "warning";
   linkedProfileSystemId?: string | null;
+  reportingManagerName?: string | null;
+  reportingManagerSynced?: boolean;
 };
 
 type UserFormProps = {
@@ -65,11 +68,13 @@ type UserFormProps = {
   description?: string;
   submitLabel: string;
   values: UserFormValues;
+  hodOptions: Option[];
   staffOptions: Option[];
   parentOptions: Option[];
   studentOptions: Option[];
   onHandoverReady?: (payload: UserHandoverPayload) => void;
   onNotify?: (input: { title: string; description?: string; tone: "success" | "error" | "info" }) => void;
+  onSuccess?: () => void;
 };
 
 export function UserForm({
@@ -77,43 +82,45 @@ export function UserForm({
   description,
   submitLabel,
   values,
+  hodOptions,
   staffOptions,
   parentOptions,
   studentOptions,
   onHandoverReady,
-  onNotify
+  onNotify,
+  onSuccess
 }: UserFormProps) {
   const [state, formAction] = useActionState(saveUserAction, initialActionFormState);
-  const [roleCategory, setRoleCategory] = useState<RoleCategory>(values.roleCategory);
-  const [specificRoleKey, setSpecificRoleKey] = useState<SpecificRoleKey>(values.specificRoleKey);
+  const [formResetKey, setFormResetKey] = useState(0);
+  const [roleCategory, setRoleCategory] = useState<RoleCategory | "">(values.roleCategory);
+  const [specificRoleKey, setSpecificRoleKey] = useState<SpecificRoleKey | "">(values.specificRoleKey);
   const [password, setPassword] = useState(values.password);
   const [forcePasswordReset, setForcePasswordReset] = useState(values.forcePasswordReset === "yes");
-  const [staffLookup, setStaffLookup] = useState("");
-  const [studentLookup, setStudentLookup] = useState("");
   const [wardLookup, setWardLookup] = useState("");
   const [selectedParentStudentIds, setSelectedParentStudentIds] = useState<string[]>(values.parentStudentIds);
 
   const roleOptions = useMemo(
-    () => SPECIFIC_ROLES_BY_CATEGORY[roleCategory].map((key) => SPECIFIC_ROLE_DEFINITIONS[key]),
+    () =>
+      roleCategory
+        ? SPECIFIC_ROLES_BY_CATEGORY[roleCategory].map((key) => SPECIFIC_ROLE_DEFINITIONS[key])
+        : [],
     [roleCategory]
   );
 
   useEffect(() => {
     if (!roleOptions.some((option) => option.key === specificRoleKey)) {
-      setSpecificRoleKey(roleOptions[0]?.key ?? "TEACHER");
+      setSpecificRoleKey("");
     }
   }, [roleOptions, specificRoleKey]);
 
-  const selectedRole = getSpecificRoleDefinition(specificRoleKey) ?? SPECIFIC_ROLE_DEFINITIONS.TEACHER;
-  const linkedProfileType = selectedRole.linkedProfileType;
+  const selectedRole = getSpecificRoleDefinition(specificRoleKey);
+  const linkedProfileType = selectedRole?.linkedProfileType ?? "none";
+  const isCreateMode = !values.id;
+  const valuesParentStudentsKey = values.parentStudentIds.join("|");
 
-  const filteredStaffOptions = useMemo(
-    () => filterOptions(staffOptions, staffLookup, "employee code or staff id"),
-    [staffLookup, staffOptions]
-  );
-  const filteredStudentOptions = useMemo(
-    () => filterOptions(studentOptions, studentLookup, "admission number"),
-    [studentLookup, studentOptions]
+  const filteredHodOptions = useMemo(
+    () => hodOptions.filter((option) => option.category === roleCategory),
+    [hodOptions, roleCategory]
   );
   const filteredWardOptions = useMemo(
     () => filterOptions(studentOptions, wardLookup, "admission number"),
@@ -127,6 +134,30 @@ export function UserForm({
   }, [linkedProfileType, values.parentStudentIds]);
 
   useEffect(() => {
+    setRoleCategory(values.roleCategory);
+    setSpecificRoleKey(values.specificRoleKey);
+    setPassword(values.password);
+    setForcePasswordReset(values.forcePasswordReset === "yes");
+    setWardLookup("");
+    setSelectedParentStudentIds(values.parentStudentIds);
+    setFormResetKey((current) => current + 1);
+  }, [
+    values.id,
+    values.fullName,
+    values.email,
+    values.phone,
+    values.roleCategory,
+    values.specificRoleKey,
+    values.password,
+    values.reportingManagerId,
+    values.staffId,
+    values.parentId,
+    values.studentId,
+    values.forcePasswordReset,
+    valuesParentStudentsKey
+  ]);
+
+  useEffect(() => {
     if (state.status !== "success" || !state.meta) {
       return;
     }
@@ -135,7 +166,33 @@ export function UserForm({
     if (payload) {
       onHandoverReady?.(payload);
     }
-  }, [onHandoverReady, state.meta, state.status]);
+
+    if (isCreateMode) {
+      resetForm();
+    }
+
+    onSuccess?.();
+  }, [isCreateMode, onHandoverReady, onSuccess, state.meta, state.status]);
+
+  useEffect(() => {
+    if (state.status !== "error" || !state.fieldErrors) {
+      return;
+    }
+
+    const firstField = Object.keys(state.fieldErrors).find((key) => state.fieldErrors?.[key as keyof typeof state.fieldErrors]?.length);
+    if (!firstField) {
+      return;
+    }
+
+    const focusMap: Record<string, string> = {
+      parentStudentIds: "parentStudentLookup"
+    };
+
+    const targetId = focusMap[firstField] ?? firstField;
+    const target = document.getElementById(targetId) as HTMLElement | null;
+    target?.focus();
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [state.fieldErrors, state.status]);
 
   function handleGeneratePassword() {
     const generated = generateSecurePassword(14);
@@ -148,11 +205,21 @@ export function UserForm({
     });
   }
 
+  function resetForm() {
+    setRoleCategory(values.roleCategory);
+    setSpecificRoleKey(values.specificRoleKey);
+    setPassword(values.password);
+    setForcePasswordReset(values.forcePasswordReset === "yes");
+    setWardLookup("");
+    setSelectedParentStudentIds(values.parentStudentIds);
+    setFormResetKey((current) => current + 1);
+  }
+
   return (
-    <form action={formAction} className="grid gap-6">
+    <form key={formResetKey} action={formAction} className="grid gap-6">
       <input type="hidden" name="id" value={values.id ?? ""} />
       <input type="hidden" name="linkedProfileType" value={linkedProfileType} />
-      <input type="hidden" name="roleCode" value={selectedRole.roleCode} />
+      <input type="hidden" name="roleCode" value={selectedRole?.roleCode ?? ""} />
       <input type="hidden" name="forcePasswordReset" value={forcePasswordReset ? "yes" : "no"} />
       {selectedParentStudentIds.map((studentId) => (
         <input key={studentId} type="hidden" name="parentStudentIds" value={studentId} />
@@ -187,7 +254,8 @@ export function UserForm({
                 id="roleCategory"
                 name="roleCategory"
                 value={roleCategory}
-                onChange={(event) => setRoleCategory(event.target.value as RoleCategory)}
+                placeholder="Select"
+                onChange={(event) => setRoleCategory(event.target.value as RoleCategory | "")}
               >
                 {ROLE_CATEGORIES.map((category) => (
                   <option key={category} value={category}>
@@ -205,7 +273,8 @@ export function UserForm({
                 id="specificRoleKey"
                 name="specificRoleKey"
                 value={specificRoleKey}
-                onChange={(event) => setSpecificRoleKey(event.target.value as SpecificRoleKey)}
+                placeholder="Select"
+                onChange={(event) => setSpecificRoleKey(event.target.value as SpecificRoleKey | "")}
               >
                 {roleOptions.map((option) => (
                   <option key={option.key} value={option.key}>
@@ -217,9 +286,24 @@ export function UserForm({
             <FieldError error={state.fieldErrors?.specificRoleKey} />
           </FieldStack>
 
+          {roleCategory && roleCategory !== "PRIMARY_USERS" && roleCategory !== "MANAGEMENT" ? (
+            <FieldStack className="md:col-span-2 xl:col-span-1">
+              <SimpleProfileSelect
+                label="Assign Department Head / Reports To (HOD)"
+                hint="Only active HOD-tagged staff records from the current department are shown here."
+                selectedValue={values.reportingManagerId}
+                fieldName="reportingManagerId"
+                fieldId="reportingManagerId"
+                options={filteredHodOptions}
+                emptyLabel="No active HOD record is available for this department yet."
+              />
+              <FieldError error={state.fieldErrors?.reportingManagerId} />
+            </FieldStack>
+          ) : null}
+
           <FieldStack>
             <FormField label="Status" htmlFor="status">
-              <Select id="status" name="status" defaultValue={values.status}>
+              <Select id="status" name="status" defaultValue={values.status} placeholder="Select">
                 <option value="yes">Active</option>
                 <option value="no">Inactive</option>
               </Select>
@@ -263,48 +347,37 @@ export function UserForm({
           </FieldStack>
         </div>
 
-        {linkedProfileType === "staff" ? (
+        {selectedRole && linkedProfileType === "staff" ? (
           <FieldStack>
-            <ProfileLookup
-              label="Linked staff profile"
-              hint="Search by Staff ID, employee code, or staff name. If no direct selection is made, the system will still attempt an auto-match."
-              searchValue={staffLookup}
-              onSearchValueChange={setStaffLookup}
-              selectedValue={values.staffId}
-              fieldName="staffId"
-              fieldId="staffId"
-              options={filteredStaffOptions}
-              emptyLabel="No matching staff profile found."
-              icon={<IdCard className="h-4 w-4" />}
-            />
-            <FieldError error={state.fieldErrors?.staffId} />
+            <FormNotice tone="indigo" icon={<ShieldCheck className="h-4 w-4" />}>
+              <p className="font-medium text-slate-900">Linked staff profile will be handled automatically.</p>
+              <p>
+                Based on the selected role plus entered name, email, and phone, the system will auto-link the matching staff profile or create one when needed.
+              </p>
+            </FormNotice>
           </FieldStack>
         ) : null}
 
-        {linkedProfileType === "student" ? (
+        {selectedRole && linkedProfileType === "student" ? (
           <FieldStack>
-            <ProfileLookup
+            <SimpleProfileSelect
               label="Link student admission profile"
-              hint="Search existing admissions by admission number, class, or student name."
-              searchValue={studentLookup}
-              onSearchValueChange={setStudentLookup}
+              hint="Select the matching student admission profile from the dropdown."
               selectedValue={values.studentId}
               fieldName="studentId"
               fieldId="studentId"
-              options={filteredStudentOptions}
+              options={studentOptions}
               emptyLabel="No student admission record matches this search."
-              icon={<Search className="h-4 w-4" />}
             />
             <FieldError error={state.fieldErrors?.studentId} />
           </FieldStack>
         ) : null}
 
-        {linkedProfileType === "parent" ? (
+        {selectedRole && linkedProfileType === "parent" ? (
           <div className="grid gap-5">
             <FieldStack>
               <FormField label="Parent profile" htmlFor="parentId" hint="Select the parent identity that will own this account.">
-                <Select id="parentId" name="parentId" defaultValue={values.parentId}>
-                  <option value="">Select parent</option>
+                <Select id="parentId" name="parentId" defaultValue={values.parentId} placeholder="Select">
                   {parentOptions.map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.label}
@@ -329,7 +402,7 @@ export function UserForm({
           </div>
         ) : null}
 
-        {linkedProfileType === "none" ? (
+        {selectedRole && linkedProfileType === "none" ? (
           <FormNotice icon={<ShieldCheck className="h-4 w-4" />} tone="indigo">
             <p className="font-medium text-slate-900">Administrative profile coupling is not required.</p>
             <p>
@@ -337,63 +410,52 @@ export function UserForm({
             </p>
           </FormNotice>
         ) : null}
+
+        <FormStateMessage state={state} />
+
+
+        <FormActions>
+          <Button type="button" variant="secondary" onClick={resetForm} className="mr-2">
+            {isCreateMode ? "Clear form" : "Reset form"}
+          </Button>
+          <SubmitButton pendingLabel="Saving user...">{submitLabel}</SubmitButton>
+        </FormActions>
+
       </FormSection>
 
-      <FormStateMessage state={state} />
-
-      <FormActions>
-        <SubmitButton pendingLabel="Saving user...">{submitLabel}</SubmitButton>
-      </FormActions>
     </form>
   );
 }
 
-function ProfileLookup({
+function SimpleProfileSelect({
   label,
   hint,
-  searchValue,
-  onSearchValueChange,
   selectedValue,
   fieldName,
   fieldId,
   options,
-  emptyLabel,
-  icon
+  emptyLabel
 }: {
   label: string;
   hint: string;
-  searchValue: string;
-  onSearchValueChange: (value: string) => void;
   selectedValue: string;
   fieldName: string;
   fieldId: string;
   options: Option[];
   emptyLabel: string;
-  icon: ReactNode;
 }) {
   return (
-    <div className="grid gap-3 rounded-[22px] border border-slate-200 bg-slate-50/50 p-4">
-      <FormField label={label} htmlFor={`${fieldId}-search`} hint={hint}>
-        <div className="relative">
-          <span className="pointer-events-none absolute left-3 top-3 text-slate-400">{icon}</span>
-          <Input
-            id={`${fieldId}-search`}
-            value={searchValue}
-            onChange={(event) => onSearchValueChange(event.target.value)}
-            className="pl-9"
-            placeholder="Type to search"
-          />
-        </div>
+    <div className="grid gap-2">
+      <FormField label={label} htmlFor={fieldId} hint={hint}>
+        <Select id={fieldId} name={fieldName} defaultValue={selectedValue} placeholder="Select">
+          {options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+              {option.meta ? ` - ${option.meta}` : ""}
+            </option>
+          ))}
+        </Select>
       </FormField>
-      <Select id={fieldId} name={fieldName} defaultValue={selectedValue}>
-        <option value="">Select profile</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-            {option.meta ? ` - ${option.meta}` : ""}
-          </option>
-        ))}
-      </Select>
       {!options.length ? <p className="text-sm text-slate-500">{emptyLabel}</p> : null}
     </div>
   );
@@ -444,11 +506,10 @@ function MultiSelectLookup({
               key={option.id}
               type="button"
               onClick={() => toggleSelection(option.id)}
-              className={`flex items-start justify-between rounded-2xl border px-3 py-3 text-left transition ${
-                selected
+              className={`flex items-start justify-between rounded-2xl border px-3 py-3 text-left transition ${selected
                   ? "border-emerald-300 bg-emerald-50 text-emerald-900"
                   : "border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/50"
-              }`}
+                }`}
             >
               <span className="grid gap-1">
                 <span className="font-medium">{option.label}</span>

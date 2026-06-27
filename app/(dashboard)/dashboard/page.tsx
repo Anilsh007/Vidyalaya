@@ -31,7 +31,7 @@ import {
   WalletCards,
   Warehouse
 } from "lucide-react";
-import { FeePaymentMode, LibraryIssueStatus } from "@prisma/client";
+import { FeePaymentMode } from "@prisma/client";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -196,6 +196,38 @@ type PersonalStudent = {
 };
 
 type VisibleNotice = Awaited<ReturnType<typeof getVisibleNotices>>[number];
+
+type OptionalDelegate = {
+  count?: (args?: unknown) => Promise<number>;
+  findMany?: (args?: unknown) => Promise<unknown[]>;
+};
+
+function getOptionalDelegate(modelName: string): OptionalDelegate | null {
+  const delegate = (db as unknown as Record<string, unknown>)[modelName];
+  if (!delegate || typeof delegate !== "object") {
+    return null;
+  }
+
+  return delegate as OptionalDelegate;
+}
+
+async function safeOptionalCount(modelName: string, args?: unknown) {
+  const delegate = getOptionalDelegate(modelName);
+  if (!delegate?.count) {
+    return 0;
+  }
+
+  return delegate.count(args);
+}
+
+async function safeOptionalFindMany<T>(modelName: string, args?: unknown): Promise<T[]> {
+  const delegate = getOptionalDelegate(modelName);
+  if (!delegate?.findMany) {
+    return [];
+  }
+
+  return (await delegate.findMany(args)) as T[];
+}
 
 const ROLE_ALIASES: Record<DashboardRoleKey, string[]> = {
   admin: ["ADMIN", "SUPER_ADMIN"],
@@ -475,21 +507,21 @@ async function buildAdminVariant(
       },
       select: { amount: true, paymentDate: true }
     }),
-    db.inventoryItem.findMany({
+    safeOptionalFindMany<{ quantityOnHand: number; minimumQuantity: number }>("inventoryItem", {
       where: { schoolId: context.schoolId, isArchived: false },
       select: { quantityOnHand: true, minimumQuantity: true }
     }),
-    db.libraryIssue.count({
+    safeOptionalCount("libraryIssue", {
       where: {
         schoolId: context.schoolId,
-        status: LibraryIssueStatus.ISSUED,
+        status: "ISSUED",
         dueDate: { lt: context.todayStart }
       }
     }),
-    db.leaveRequest.count({
+    safeOptionalCount("leaveRequest", {
       where: { schoolId: context.schoolId, status: "PENDING" }
     }),
-    db.transportVehicle.findMany({
+    safeOptionalFindMany<{ insuranceValidUntil: Date | null; fitnessValidUntil: Date | null; isActive: boolean }>("transportVehicle", {
       where: { schoolId: context.schoolId, isArchived: false },
       select: { insuranceValidUntil: true, fitnessValidUntil: true, isActive: true }
     }),
@@ -617,7 +649,7 @@ async function buildLeadershipVariant(
     db.student.count({
       where: { schoolId: context.schoolId, status: { not: "ARCHIVED" } }
     }),
-    db.leaveRequest.count({
+    safeOptionalCount("leaveRequest", {
       where: {
         schoolId: context.schoolId,
         requesterType: "STAFF",
@@ -633,7 +665,7 @@ async function buildLeadershipVariant(
         date: { gte: context.todayStart, lte: context.todayEnd }
       }
     }),
-    db.leaveRequest.count({
+    safeOptionalCount("leaveRequest", {
       where: { schoolId: context.schoolId, status: "PENDING" }
     }),
     db.attendance.findMany({
@@ -1073,29 +1105,29 @@ async function buildLibraryVariant(
   visibleNotices: VisibleNotice[]
 ): Promise<DashboardVariant> {
   const [books, issuesToday, overdueBooks, recentFines] = await Promise.all([
-    db.libraryBook.count({
-      where: { schoolId: context.schoolId, isArchived: false }
-    }),
-    db.libraryIssue.count({
-      where: {
-        schoolId: context.schoolId,
-        issueDate: { gte: context.todayStart, lte: context.todayEnd }
-      }
-    }),
-    db.libraryIssue.count({
-      where: {
-        schoolId: context.schoolId,
-        status: LibraryIssueStatus.ISSUED,
-        dueDate: { lt: context.todayStart }
-      }
-    }),
-    db.libraryIssue.findMany({
-      where: {
-        schoolId: context.schoolId,
-        createdAt: { gte: context.monthStart, lte: context.todayEnd }
-      },
-      select: { fineAmount: true }
-    })
+      safeOptionalCount("libraryBook", {
+        where: { schoolId: context.schoolId, isArchived: false }
+      }),
+      safeOptionalCount("libraryIssue", {
+        where: {
+          schoolId: context.schoolId,
+          issueDate: { gte: context.todayStart, lte: context.todayEnd }
+        }
+      }),
+      safeOptionalCount("libraryIssue", {
+        where: {
+          schoolId: context.schoolId,
+          status: "ISSUED",
+          dueDate: { lt: context.todayStart }
+        }
+      }),
+      safeOptionalFindMany<{ fineAmount: number | null }>("libraryIssue", {
+        where: {
+          schoolId: context.schoolId,
+          createdAt: { gte: context.monthStart, lte: context.todayEnd }
+        },
+        select: { fineAmount: true }
+      })
   ]);
 
   const fineCollected = recentFines.reduce((sum, issue) => sum + Number(issue.fineAmount), 0);
@@ -1149,15 +1181,15 @@ async function buildTransportVariant(
   visibleNotices: VisibleNotice[]
 ): Promise<DashboardVariant> {
   const [vehicles, routes, activeAssignments] = await Promise.all([
-    db.transportVehicle.findMany({
+    safeOptionalFindMany<{ isActive: boolean; insuranceValidUntil: Date | null; fitnessValidUntil: Date | null }>("transportVehicle", {
       where: { schoolId: context.schoolId, isArchived: false },
       select: { isActive: true, insuranceValidUntil: true, fitnessValidUntil: true }
     }),
-    db.transportRoute.findMany({
+    safeOptionalFindMany<{ isActive: boolean }>("transportRoute", {
       where: { schoolId: context.schoolId, isArchived: false },
       select: { isActive: true }
     }),
-    db.transportAssignment.findMany({
+    safeOptionalFindMany<{ id: string }>("transportAssignment", {
       where: { schoolId: context.schoolId, status: "ACTIVE" },
       select: { id: true }
     })
@@ -1221,17 +1253,17 @@ async function buildHostelVariant(
   visibleNotices: VisibleNotice[]
 ): Promise<DashboardVariant> {
   const [rooms, activeAllocations] = await Promise.all([
-    db.hostelRoom.findMany({
+    safeOptionalFindMany<{ capacity: number | null }>("hostelRoom", {
       where: { schoolId: context.schoolId, isArchived: false },
       select: { capacity: true }
     }),
-    db.hostelAllocation.findMany({
+    safeOptionalFindMany<{ id: string; remarks: string | null }>("hostelAllocation", {
       where: { schoolId: context.schoolId, status: "ACTIVE" },
       select: { id: true, remarks: true }
     })
   ]);
 
-  const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0);
+  const totalCapacity = rooms.reduce((sum, room) => sum + (room.capacity ?? 0), 0);
   const occupancyRate = totalCapacity ? Math.round((activeAllocations.length / totalCapacity) * 100) : 0;
   const messMenuNotice =
     visibleNotices.find((notice) => {
@@ -1292,11 +1324,11 @@ async function buildInventoryVariant(
   visibleNotices: VisibleNotice[]
 ): Promise<DashboardVariant> {
   const [items, movements] = await Promise.all([
-    db.inventoryItem.findMany({
+    safeOptionalFindMany<{ category: string | null; quantityOnHand: number; minimumQuantity: number }>("inventoryItem", {
       where: { schoolId: context.schoolId, isArchived: false },
       select: { category: true, quantityOnHand: true, minimumQuantity: true }
     }),
-    db.inventoryMovement.findMany({
+    safeOptionalFindMany<{ movementType: string; issuedTo: string | null }>("inventoryMovement", {
       where: { schoolId: context.schoolId, movementDate: { gte: context.monthStart, lte: context.todayEnd } },
       select: { movementType: true, issuedTo: true }
     })
