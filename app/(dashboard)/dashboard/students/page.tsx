@@ -2,9 +2,10 @@ import Link from "next/link";
 import { Plus, Search, UserRound } from "lucide-react";
 
 import { EmptyState } from "@/components/school/empty-state";
+import { ActionRow, CountLabel, FilterCard, SectionHeaderCard } from "@/components/shared/listing-primitives";
+import { StatusBadge, TableFrame } from "@/components/shared/dashboard-primitives";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -94,14 +95,7 @@ export default async function StudentsPage({
         }
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Search and filters</CardTitle>
-          <p className="text-sm leading-6 text-slate-600">
-            Filter the register by class, section, status, or sort order to find records quickly.
-          </p>
-        </CardHeader>
-        <CardContent>
+      <FilterCard description="Filter the register by class, section, status, or sort order to find records quickly.">
           <form className="grid gap-4 lg:grid-cols-[1.4fr_1fr_1fr_1fr_180px] lg:items-end">
             <FormField label="Search" htmlFor="q">
               <div className="relative">
@@ -144,33 +138,22 @@ export default async function StudentsPage({
                 <option value="recent">Recently added</option>
               </Select>
             </FormField>
-            <div className="flex flex-wrap gap-3 lg:col-span-5">
+            <ActionRow className="lg:col-span-5">
               <Button type="submit">Apply filters</Button>
               <Link href="/dashboard/students">
                 <Button variant="secondary">Reset</Button>
               </Link>
-            </div>
+            </ActionRow>
           </form>
-        </CardContent>
-      </Card>
+      </FilterCard>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-brand-700">
-              <UserRound className="h-5 w-5" />
-            </div>
-            <div className="grid gap-1">
-              <CardTitle>Student list</CardTitle>
-              <p className="text-sm leading-6 text-slate-600">
-                {students.length} record{students.length === 1 ? "" : "s"} found.
-              </p>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
+      <SectionHeaderCard
+        icon={<UserRound className="h-5 w-5" />}
+        title="Student list"
+        description={<CountLabel count={students.length} singular="record" />}
+      >
           {students.length ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <TableFrame>
               <Table>
                 <THead>
                   <tr>
@@ -203,7 +186,15 @@ export default async function StudentsPage({
                         {student.guardians[0]?.parent.guardianName ?? "Not linked"}
                       </TD>
                       <TD>
-                        <span className={statusPillClass(student.status)}>{student.status}</span>
+                        <StatusBadge
+                          status={student.status}
+                          toneMap={{
+                            ACTIVE: "bg-emerald-50 text-emerald-700",
+                            ARCHIVED: "bg-slate-200 text-slate-700",
+                            INACTIVE: "bg-amber-50 text-amber-700"
+                          }}
+                          className="px-3"
+                        />
                       </TD>
                       <TD className="text-right">
                         <Link href={`/dashboard/students/${student.id}`}>
@@ -216,7 +207,7 @@ export default async function StudentsPage({
                   ))}
                 </TBody>
               </Table>
-            </div>
+            </TableFrame>
           ) : (
             <EmptyState
               title="No students match the current filters"
@@ -233,24 +224,11 @@ export default async function StudentsPage({
               }
             />
           )}
-        </CardContent>
-      </Card>
+      </SectionHeaderCard>
     </div>
   );
 }
 
 function hasManageStudents(permissions: string[]) {
   return permissions.includes(PERMISSIONS.manageStudents);
-}
-
-function statusPillClass(status: string) {
-  if (status === "ACTIVE") {
-    return "rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700";
-  }
-
-  if (status === "ARCHIVED") {
-    return "rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700";
-  }
-
-  return "rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700";
 }

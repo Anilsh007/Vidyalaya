@@ -10,16 +10,26 @@ type DialogProps = {
   title: string;
   description?: string;
   triggerLabel: string;
+  triggerVariant?: "primary" | "secondary" | "ghost" | "danger";
+  triggerClassName?: string;
   children: ReactNode;
 };
 
-export function Dialog({ title, description, triggerLabel, children }: DialogProps) {
+export function Dialog({
+  title,
+  description,
+  triggerLabel,
+  triggerVariant = "secondary",
+  triggerClassName,
+  children
+}: DialogProps) {
   const dialogId = useId();
 
   return (
     <>
       <Button
-        variant="secondary"
+        variant={triggerVariant}
+        className={triggerClassName}
         onClick={() => {
           const dialog = document.getElementById(dialogId) as HTMLDialogElement | null;
           dialog?.showModal();

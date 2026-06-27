@@ -12,8 +12,20 @@ export default async function DashboardLayout({
   const session = await getRequiredSession();
   const user = await db.user.findUnique({
     where: { id: session.userId },
-    include: { school: true }
+    include: {
+      school: true,
+      staffProfile: {
+        select: {
+          designation: true
+        }
+      }
+    }
   });
+
+  const roleHints = [
+    ...session.roles,
+    ...(user?.staffProfile?.designation ? [user.staffProfile.designation] : [])
+  ];
 
   return (
     <AppShell
@@ -21,6 +33,7 @@ export default async function DashboardLayout({
       schoolName={user?.school.name ?? "School"}
       userLabel={user?.fullName ?? "Staff account"}
       permissions={session.permissions}
+      roleHints={roleHints}
     >
       {children}
     </AppShell>

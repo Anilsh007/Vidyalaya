@@ -7,6 +7,8 @@ import {
 } from "@/app/(dashboard)/dashboard/settings/actions";
 import { EmptyState } from "@/components/school/empty-state";
 import { ClassForm, SectionForm, SubjectForm } from "@/components/school/settings-crud-forms";
+import { TableFrame } from "@/components/shared/dashboard-primitives";
+import { SectionHeaderCard, TableActionGroup } from "@/components/shared/listing-primitives";
 import { SchoolSettingsForm } from "@/components/school/school-settings-form";
 import { PageHeader } from "@/components/shared/page-header";
 import { Dialog } from "@/components/ui/dialog";
@@ -80,24 +82,16 @@ export default async function SettingsPage() {
       </Card>
 
       <section className="grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                <Layers3 className="h-5 w-5" />
-              </div>
-              <div className="grid gap-1">
-                <CardTitle>Class management</CardTitle>
-                <p className="text-sm leading-6 text-slate-600">
-                  Create classes once and reuse them for sections, subjects, admissions, and reporting.
-                </p>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="grid gap-4">
+        <SectionHeaderCard
+          icon={<Layers3 className="h-5 w-5" />}
+          title="Class management"
+          description="Create classes once and reuse them for sections, subjects, admissions, and reporting."
+          iconClassName="bg-slate-100 text-slate-700"
+        >
+          <div className="grid gap-4">
             <ClassForm />
             {classes.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -112,7 +106,7 @@ export default async function SettingsPage() {
                         <TD className="font-medium text-slate-950">{item.name}</TD>
                         <TD>{item.displayOrder}</TD>
                         <TD>
-                          <div className="flex flex-wrap justify-end gap-2">
+                          <TableActionGroup>
                             <Dialog
                               title={`Edit ${item.name}`}
                               description="Update the class label or sort order."
@@ -132,43 +126,35 @@ export default async function SettingsPage() {
                                 Delete
                               </Button>
                             </form>
-                          </div>
+                          </TableActionGroup>
                         </TD>
                       </tr>
                     ))}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : (
               <EmptyState
                 title="No classes yet"
                 description="Create the first class so sections and subjects can be attached to it."
               />
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionHeaderCard>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                <UsersRound className="h-5 w-5" />
-              </div>
-              <div className="grid gap-1">
-                <CardTitle>Section management</CardTitle>
-                <p className="text-sm leading-6 text-slate-600">
-                  Keep sections tied to a class and prepare class teacher assignment for future timetable work.
-                </p>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="grid gap-4">
+        <SectionHeaderCard
+          icon={<UsersRound className="h-5 w-5" />}
+          title="Section management"
+          description="Keep sections tied to a class and prepare class teacher assignment for future timetable work."
+          iconClassName="bg-slate-100 text-slate-700"
+        >
+          <div className="grid gap-4">
             <SectionForm
               classes={classes.map((item) => ({ id: item.id, name: item.name }))}
               teachers={teachers}
             />
             {sections.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -187,7 +173,7 @@ export default async function SettingsPage() {
                         <TD>{item.classTeacher?.fullName ?? "Not assigned"}</TD>
                         <TD>{item.capacity ?? "Not set"}</TD>
                         <TD>
-                          <div className="flex flex-wrap justify-end gap-2">
+                          <TableActionGroup>
                             <Dialog
                               title={`Edit section ${item.class.name} - ${item.name}`}
                               description="Update the section, capacity, or class teacher assignment."
@@ -211,41 +197,33 @@ export default async function SettingsPage() {
                                 Delete
                               </Button>
                             </form>
-                          </div>
+                          </TableActionGroup>
                         </TD>
                       </tr>
                     ))}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : (
               <EmptyState
                 title="No sections yet"
                 description="Create sections after the class list is ready so admissions can place students cleanly."
               />
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionHeaderCard>
       </section>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-              <Settings2 className="h-5 w-5" />
-            </div>
-            <div className="grid gap-1">
-              <CardTitle>Subject management</CardTitle>
-              <p className="text-sm leading-6 text-slate-600">
-                Build the subject list, assign class-specific subjects, and keep codes ready for exams and report cards.
-              </p>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-4">
+      <SectionHeaderCard
+        icon={<Settings2 className="h-5 w-5" />}
+        title="Subject management"
+        description="Build the subject list, assign class-specific subjects, and keep codes ready for exams and report cards."
+        iconClassName="bg-slate-100 text-slate-700"
+      >
+        <div className="grid gap-4">
           <SubjectForm classes={classes.map((item) => ({ id: item.id, name: item.name }))} />
           {subjects.length ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <TableFrame>
               <Table>
                 <THead>
                   <tr>
@@ -262,7 +240,7 @@ export default async function SettingsPage() {
                       <TD>{item.code}</TD>
                       <TD>{item.class?.name ?? "Common subject"}</TD>
                       <TD>
-                        <div className="flex flex-wrap justify-end gap-2">
+                        <TableActionGroup>
                           <Dialog
                             title={`Edit ${item.name}`}
                             description="Update the subject code or class assignment."
@@ -284,21 +262,21 @@ export default async function SettingsPage() {
                               Delete
                             </Button>
                           </form>
-                        </div>
+                        </TableActionGroup>
                       </TD>
                     </tr>
                   ))}
                 </TBody>
               </Table>
-            </div>
+            </TableFrame>
           ) : (
             <EmptyState
               title="No subjects yet"
               description="Add subjects once the class structure is ready so teachers and exam setups can reuse them."
             />
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SectionHeaderCard>
     </div>
   );
 }

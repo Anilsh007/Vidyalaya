@@ -1,8 +1,8 @@
 import { CalendarDays, IndianRupee, Landmark, ReceiptText, UsersRound } from "lucide-react";
-import type { ReactNode } from "react";
 
 import { PayrollRunForm, PayrollRunStatusForm, PayrollSlipStatusForm } from "@/components/payroll/payroll-forms";
 import { EmptyState } from "@/components/school/empty-state";
+import { InfoPanel, StatusBadge, SummaryCard, TableFrame } from "@/components/shared/dashboard-primitives";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
@@ -11,11 +11,13 @@ import { requirePermission } from "@/lib/auth/access";
 import { db } from "@/lib/db";
 import { payrollPeriodLabel } from "@/lib/payroll";
 import { PERMISSIONS } from "@/lib/permissions";
-import { cn, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 export default async function PayrollPage() {
   const session = await requirePermission(PERMISSIONS.viewPayroll);
   const canManagePayroll = session.permissions.includes(PERMISSIONS.managePayroll);
+  const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "payroll");
 
   const [staffWithSalary, payrollRuns, payrollSlips] = await Promise.all([
     db.staff.findMany({
@@ -61,11 +63,11 @@ export default async function PayrollPage() {
           <CardHeader>
             <CardTitle>{canManagePayroll ? "Generate payroll" : "Payroll controls"}</CardTitle>
             <p className="text-sm leading-6 text-slate-600">
-              {canManagePayroll ? "Create a monthly payroll run from active staff records that have salary references." : "Your account can review payroll records but cannot generate or update payroll."}
+              {canManagePayroll ? "Create a monthly payroll run from active staff records that have salary references." : accessCopy.summary}
             </p>
           </CardHeader>
           <CardContent>
-            {canManagePayroll ? <PayrollRunForm /> : <EmptyState title="View-only access" description="Ask an administrator for payroll management permission to generate and approve payroll." />}
+            {canManagePayroll ? <PayrollRunForm /> : <EmptyState title={accessCopy.title} description={accessCopy.description} />}
           </CardContent>
         </Card>
 
@@ -76,7 +78,7 @@ export default async function PayrollPage() {
           </CardHeader>
           <CardContent>
             {payrollRuns.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <TableFrame>
                 <Table>
                   <THead><tr><TH>Period</TH><TH>Slips</TH><TH>Net pay</TH><TH>Status</TH><TH className="text-right">Action</TH></tr></THead>
                   <TBody>
@@ -87,14 +89,14 @@ export default async function PayrollPage() {
                           <TD><div className="grid gap-1"><span className="font-medium text-slate-950">{payrollPeriodLabel(run.periodMonth, run.periodYear)}</span><span className="text-xs text-slate-500">{run.paymentDate ? `Payment ${formatDate(run.paymentDate)}` : "No payment date"}</span></div></TD>
                           <TD>{run.slips.length}</TD>
                           <TD>{formatCurrency(totalNet)}</TD>
-                          <TD><StatusBadge status={run.status} /></TD>
+                          <TD><StatusBadge status={run.status} toneMap={{ PAID: "bg-emerald-50 text-emerald-700", APPROVED: "bg-blue-50 text-blue-700", FINALIZED: "bg-blue-50 text-blue-700", CANCELLED: "bg-red-50 text-red-700", DRAFT: "bg-amber-50 text-amber-700" }} /></TD>
                           <TD className="text-right">{canManagePayroll ? <Dialog title={`Update ${run.title}`} description="Finalize, mark paid, or cancel this payroll cycle." triggerLabel="Update"><PayrollRunStatusForm payrollRunId={run.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD>
                         </tr>
                       );
                     })}
                   </TBody>
                 </Table>
-              </div>
+                </TableFrame>
             ) : (
               <EmptyState title="No payroll runs" description="Generate the first payroll run after staff salary references are ready." />
             )}
@@ -109,7 +111,7 @@ export default async function PayrollPage() {
         </CardHeader>
         <CardContent>
           {payrollSlips.length ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <TableFrame>
               <Table>
                 <THead><tr><TH>Staff</TH><TH>Period</TH><TH>Gross</TH><TH>Allowances</TH><TH>Deductions</TH><TH>Net</TH><TH>Status</TH><TH className="text-right">Action</TH></tr></THead>
                 <TBody>
@@ -121,13 +123,13 @@ export default async function PayrollPage() {
                       <TD>{formatCurrency(Number(slip.allowances))}</TD>
                       <TD>{formatCurrency(Number(slip.deductions))}</TD>
                       <TD className="font-medium text-slate-950">{formatCurrency(Number(slip.netPay))}</TD>
-                      <TD><StatusBadge status={slip.status} /></TD>
+                      <TD><StatusBadge status={slip.status} toneMap={{ PAID: "bg-emerald-50 text-emerald-700", APPROVED: "bg-blue-50 text-blue-700", FINALIZED: "bg-blue-50 text-blue-700", CANCELLED: "bg-red-50 text-red-700", DRAFT: "bg-amber-50 text-amber-700" }} /></TD>
                       <TD className="text-right">{canManagePayroll ? <Dialog title={`Update ${slip.staffName}`} description="Approve this payslip or mark it as paid." triggerLabel="Update"><PayrollSlipStatusForm slipId={slip.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD>
                     </tr>
                   ))}
                 </TBody>
               </Table>
-            </div>
+            </TableFrame>
           ) : (
             <EmptyState title="No payroll slips" description="Payroll slips will appear after a payroll run is generated." />
           )}
@@ -135,26 +137,15 @@ export default async function PayrollPage() {
       </Card>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <InfoPanel title="Latest cycle" value={latestRun ? payrollPeriodLabel(latestRun.periodMonth, latestRun.periodYear) : "Not generated"} description="The most recent payroll cycle gives accounts a quick starting point for salary review." />
-        <InfoPanel title="Salary readiness" value={`${staffWithSalary.length} staff`} description="Payroll runs include active staff members with salary reference amounts in staff management." />
-        <InfoPanel title="Payment control" value={`${payrollSlips.filter((slip) => slip.status === "PAID").length} paid`} description="Paid slips are tracked separately from draft and approved slips for accounting follow-up." />
+        <InfoPanel title="Latest cycle" value={latestRun ? payrollPeriodLabel(latestRun.periodMonth, latestRun.periodYear) : "Not generated"} description="The most recent payroll cycle gives accounts a quick starting point for salary review." icon={<CalendarDays className="h-5 w-5" />} />
+        <InfoPanel title="Salary readiness" value={`${staffWithSalary.length} staff`} description="Payroll runs include active staff members with salary reference amounts in staff management." icon={<CalendarDays className="h-5 w-5" />} />
+        <InfoPanel title="Payment control" value={`${payrollSlips.filter((slip) => slip.status === "PAID").length} paid`} description="Paid slips are tracked separately from draft and approved slips for accounting follow-up." icon={<CalendarDays className="h-5 w-5" />} />
       </section>
     </div>
   );
 }
 
-function SummaryCard({ title, value, icon }: { title: string; value: string; icon: ReactNode }) {
-  return <Card><CardContent className="flex items-center justify-between gap-4 pt-6"><div><p className="text-sm text-slate-500">{title}</p><p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">{value}</p></div><div className="rounded-2xl bg-brand-50 p-3 text-brand-700">{icon}</div></CardContent></Card>;
-}
-
-function InfoPanel({ title, value, description }: { title: string; value: string; description: string }) {
-  return <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-panel"><div className="mb-4 inline-flex rounded-2xl bg-slate-100 p-3 text-slate-700"><CalendarDays className="h-5 w-5" /></div><p className="text-sm font-medium text-slate-500">{title}</p><p className="mt-1 text-xl font-semibold text-slate-950">{value}</p><p className="mt-3 text-sm leading-6 text-slate-600">{description}</p></div>;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  return <span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", status === "PAID" ? "bg-emerald-50 text-emerald-700" : status === "APPROVED" || status === "FINALIZED" ? "bg-blue-50 text-blue-700" : status === "CANCELLED" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700")}>{status}</span>;
-}
-
 function formatDate(value: Date) {
   return value.toISOString().slice(0, 10);
 }
+

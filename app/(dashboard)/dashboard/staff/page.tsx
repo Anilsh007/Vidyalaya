@@ -2,9 +2,10 @@ import Link from "next/link";
 import { Plus, Search, UserCog } from "lucide-react";
 
 import { EmptyState } from "@/components/school/empty-state";
+import { ActionRow, CountLabel, FilterCard, SectionHeaderCard } from "@/components/shared/listing-primitives";
+import { StatusBadge, TableFrame } from "@/components/shared/dashboard-primitives";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -93,14 +94,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Search
         }
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Search and filters</CardTitle>
-          <p className="text-sm leading-6 text-slate-600">
-            Find staff by name, employee code, designation, phone, email, department, or staff type.
-          </p>
-        </CardHeader>
-        <CardContent>
+      <FilterCard description="Find staff by name, employee code, designation, phone, email, department, or staff type.">
           <form className="grid gap-4 lg:grid-cols-[1.4fr_1fr_1fr_1fr_180px] lg:items-end">
             <FormField label="Search" htmlFor="q">
               <div className="relative">
@@ -141,33 +135,22 @@ export default async function StaffPage({ searchParams }: { searchParams: Search
                 <option value="recent">Recently added</option>
               </Select>
             </FormField>
-            <div className="flex flex-wrap gap-3 lg:col-span-5">
+            <ActionRow className="lg:col-span-5">
               <Button type="submit">Apply filters</Button>
               <Link href="/dashboard/staff">
                 <Button variant="secondary">Reset</Button>
               </Link>
-            </div>
+            </ActionRow>
           </form>
-        </CardContent>
-      </Card>
+      </FilterCard>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-brand-700">
-              <UserCog className="h-5 w-5" />
-            </div>
-            <div className="grid gap-1">
-              <CardTitle>Staff register</CardTitle>
-              <p className="text-sm leading-6 text-slate-600">
-                {staff.length} record{staff.length === 1 ? "" : "s"} found.
-              </p>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
+      <SectionHeaderCard
+        icon={<UserCog className="h-5 w-5" />}
+        title="Staff register"
+        description={<CountLabel count={staff.length} singular="record" />}
+      >
           {staff.length ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <TableFrame>
               <Table>
                 <THead>
                   <tr>
@@ -203,21 +186,25 @@ export default async function StaffPage({ searchParams }: { searchParams: Search
                           </div>
                         </TD>
                         <TD>
-                          <span className={`rounded-full border px-3 py-1 text-xs font-medium ${item.isArchived ? "border-slate-200 bg-slate-100 text-slate-600" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
-                            {item.isArchived ? "Archived" : "Active"}
-                          </span>
+                          <StatusBadge
+                            status={item.isArchived ? "Archived" : "Active"}
+                            toneMap={{
+                              Active: "border border-emerald-200 bg-emerald-50 text-emerald-700",
+                              Archived: "border border-slate-200 bg-slate-100 text-slate-600"
+                            }}
+                            className="px-3"
+                          />
                         </TD>
                       </tr>
                     );
                   })}
                 </TBody>
               </Table>
-            </div>
+            </TableFrame>
           ) : (
             <EmptyState title="No staff records found" description="Add staff records or adjust the filters to see employees here." />
           )}
-        </CardContent>
-      </Card>
+      </SectionHeaderCard>
     </div>
   );
 }

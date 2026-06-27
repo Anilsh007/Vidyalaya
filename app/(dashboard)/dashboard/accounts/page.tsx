@@ -1,9 +1,9 @@
 import { ClipboardList, IndianRupee, ReceiptText, Tags, WalletCards } from "lucide-react";
 import type { ExpenseVoucherStatus, FeePaymentMode, Prisma } from "@prisma/client";
-import type { ReactNode } from "react";
 
 import { ExpenseCategoryForm, ExpenseVoucherForm, ExpenseVoucherStatusForm } from "@/components/accounts/account-forms";
 import { EmptyState } from "@/components/school/empty-state";
+import { InfoPanel, StatusBadge, SummaryCard, TableFrame } from "@/components/shared/dashboard-primitives";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
@@ -12,11 +12,13 @@ import { requirePermission } from "@/lib/auth/access";
 import { db } from "@/lib/db";
 import { fromMoney } from "@/lib/fees";
 import { PERMISSIONS } from "@/lib/permissions";
-import { cn, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 export default async function AccountsPage() {
   const session = await requirePermission(PERMISSIONS.viewAccounts);
   const canManageAccounts = session.permissions.includes(PERMISSIONS.manageAccounts);
+  const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "accounts");
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
@@ -51,8 +53,8 @@ export default async function AccountsPage() {
 
       <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
         <Card>
-          <CardHeader><CardTitle>{canManageAccounts ? "New expense voucher" : "Expense controls"}</CardTitle><p className="text-sm leading-6 text-slate-600">{canManageAccounts ? "Record bill, vendor, amount, payment mode, and expense category." : "Your account can review accounts but cannot create or approve expense vouchers."}</p></CardHeader>
-          <CardContent>{canManageAccounts ? <ExpenseVoucherForm categories={activeCategories.map((category) => ({ id: category.id, code: category.code, name: category.name }))} /> : <EmptyState title="View-only access" description="Ask an administrator for accounts management permission to create or approve vouchers." />}</CardContent>
+          <CardHeader><CardTitle>{canManageAccounts ? "New expense voucher" : "Expense controls"}</CardTitle><p className="text-sm leading-6 text-slate-600">{canManageAccounts ? "Record bill, vendor, amount, payment mode, and expense category." : accessCopy.summary}</p></CardHeader>
+          <CardContent>{canManageAccounts ? <ExpenseVoucherForm categories={activeCategories.map((category) => ({ id: category.id, code: category.code, name: category.name }))} /> : <EmptyState title={accessCopy.title} description={accessCopy.description} />}</CardContent>
         </Card>
 
         <Card>
@@ -60,7 +62,7 @@ export default async function AccountsPage() {
           <CardContent className="grid gap-5">
             {canManageAccounts ? <ExpenseCategoryForm /> : null}
             {categories.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200"><Table><THead><tr><TH>Code</TH><TH>Name</TH><TH>Status</TH><TH className="text-right">Action</TH></tr></THead><TBody>{categories.map((category) => (<tr key={category.id}><TD>{category.code}</TD><TD><div className="grid gap-1"><span className="font-medium text-slate-950">{category.name}</span><span className="text-xs text-slate-500">{category.description ?? "No description"}</span></div></TD><TD><StatusBadge status={category.isActive ? "ACTIVE" : "INACTIVE"} /></TD><TD className="text-right">{canManageAccounts ? <Dialog title={`Edit ${category.name}`} description="Update category label and active status." triggerLabel="Edit"><ExpenseCategoryForm defaultValues={category} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD></tr>))}</TBody></Table></div>
+              <TableFrame><Table><THead><tr><TH>Code</TH><TH>Name</TH><TH>Status</TH><TH className="text-right">Action</TH></tr></THead><TBody>{categories.map((category) => (<tr key={category.id}><TD>{category.code}</TD><TD><div className="grid gap-1"><span className="font-medium text-slate-950">{category.name}</span><span className="text-xs text-slate-500">{category.description ?? "No description"}</span></div></TD><TD><StatusBadge status={category.isActive ? "ACTIVE" : "INACTIVE"} toneMap={{ ACTIVE: "bg-emerald-50 text-emerald-700", INACTIVE: "bg-red-50 text-red-700" }} /></TD><TD className="text-right">{canManageAccounts ? <Dialog title={`Edit ${category.name}`} description="Update category label and active status." triggerLabel="Edit"><ExpenseCategoryForm defaultValues={category} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD></tr>))}</TBody></Table></TableFrame>
             ) : <EmptyState title="No categories" description="Create an expense category before recording vouchers." />}
           </CardContent>
         </Card>
@@ -77,13 +79,13 @@ export default async function AccountsPage() {
       </Card>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <InfoPanel title="Approval discipline" value={`${draftVouchers.length} draft`} description="Draft vouchers should be approved before accounts marks them as paid." />
-        <InfoPanel title="Payment tracking" value={formatCurrency(paidExpense)} description="Paid totals help accounts compare cash/bank outflow against supporting vouchers." />
-        <InfoPanel title="Category control" value={`${activeCategories.length} active`} description="Expense categories keep reports grouped by operational spending heads." />
-      </section>
-    </div>
-  );
-}
+          <InfoPanel title="Approval discipline" value={`${draftVouchers.length} draft`} description="Draft vouchers should be approved before accounts marks them as paid." icon={<ReceiptText className="h-5 w-5" />} />
+          <InfoPanel title="Payment tracking" value={formatCurrency(paidExpense)} description="Paid totals help accounts compare cash/bank outflow against supporting vouchers." icon={<ReceiptText className="h-5 w-5" />} />
+          <InfoPanel title="Category control" value={`${activeCategories.length} active`} description="Expense categories keep reports grouped by operational spending heads." icon={<ReceiptText className="h-5 w-5" />} />
+        </section>
+      </div>
+    );
+  }
 
 type Voucher = {
   id: string;
@@ -100,21 +102,10 @@ type Voucher = {
 };
 
 function VoucherTable({ vouchers, canManage }: { vouchers: Voucher[]; canManage: boolean }) {
-  return <div className="overflow-hidden rounded-2xl border border-slate-200"><Table><THead><tr><TH>Voucher</TH><TH>Category</TH><TH>Paid to</TH><TH>Amount</TH><TH>Mode</TH><TH>Status</TH><TH className="text-right">Action</TH></tr></THead><TBody>{vouchers.map((voucher) => (<tr key={voucher.id}><TD><div className="grid gap-1"><span className="font-medium text-slate-950">{voucher.voucherNumber}</span><span className="text-xs text-slate-500">{formatDate(voucher.expenseDate)}</span></div></TD><TD>{voucher.category.code} - {voucher.category.name}</TD><TD><div className="grid gap-1"><span>{voucher.paidTo}</span><span className="text-xs text-slate-500">{voucher.vendorName ?? voucher.description}</span></div></TD><TD>{formatCurrency(fromMoney(voucher.amount))}</TD><TD>{voucher.paymentMode.replaceAll("_", " ")}{voucher.referenceNo ? <p className="text-xs text-slate-500">{voucher.referenceNo}</p> : null}</TD><TD><StatusBadge status={voucher.status} /></TD><TD className="text-right">{canManage ? <Dialog title={`Update ${voucher.voucherNumber}`} description="Approve, mark paid, or cancel this expense voucher." triggerLabel="Update"><ExpenseVoucherStatusForm voucherId={voucher.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD></tr>))}</TBody></Table></div>;
-}
-
-function SummaryCard({ title, value, icon }: { title: string; value: string; icon: ReactNode }) {
-  return <Card><CardContent className="flex items-center justify-between gap-4 pt-6"><div><p className="text-sm text-slate-500">{title}</p><p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">{value}</p></div><div className="rounded-2xl bg-brand-50 p-3 text-brand-700">{icon}</div></CardContent></Card>;
-}
-
-function InfoPanel({ title, value, description }: { title: string; value: string; description: string }) {
-  return <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-panel"><div className="mb-4 inline-flex rounded-2xl bg-slate-100 p-3 text-slate-700"><ReceiptText className="h-5 w-5" /></div><p className="text-sm font-medium text-slate-500">{title}</p><p className="mt-1 text-xl font-semibold text-slate-950">{value}</p><p className="mt-3 text-sm leading-6 text-slate-600">{description}</p></div>;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  return <span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", status === "PAID" || status === "ACTIVE" ? "bg-emerald-50 text-emerald-700" : status === "APPROVED" ? "bg-blue-50 text-blue-700" : status === "CANCELLED" || status === "INACTIVE" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700")}>{status}</span>;
+  return <TableFrame><Table><THead><tr><TH>Voucher</TH><TH>Category</TH><TH>Paid to</TH><TH>Amount</TH><TH>Mode</TH><TH>Status</TH><TH className="text-right">Action</TH></tr></THead><TBody>{vouchers.map((voucher) => (<tr key={voucher.id}><TD><div className="grid gap-1"><span className="font-medium text-slate-950">{voucher.voucherNumber}</span><span className="text-xs text-slate-500">{formatDate(voucher.expenseDate)}</span></div></TD><TD>{voucher.category.code} - {voucher.category.name}</TD><TD><div className="grid gap-1"><span>{voucher.paidTo}</span><span className="text-xs text-slate-500">{voucher.vendorName ?? voucher.description}</span></div></TD><TD>{formatCurrency(fromMoney(voucher.amount))}</TD><TD>{voucher.paymentMode.replaceAll("_", " ")}{voucher.referenceNo ? <p className="text-xs text-slate-500">{voucher.referenceNo}</p> : null}</TD><TD><StatusBadge status={voucher.status} toneMap={{ PAID: "bg-emerald-50 text-emerald-700", ACTIVE: "bg-emerald-50 text-emerald-700", APPROVED: "bg-blue-50 text-blue-700", CANCELLED: "bg-red-50 text-red-700", INACTIVE: "bg-red-50 text-red-700", DRAFT: "bg-amber-50 text-amber-700" }} /></TD><TD className="text-right">{canManage ? <Dialog title={`Update ${voucher.voucherNumber}`} description="Approve, mark paid, or cancel this expense voucher." triggerLabel="Update"><ExpenseVoucherStatusForm voucherId={voucher.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD></tr>))}</TBody></Table></TableFrame>;
 }
 
 function formatDate(value: Date) {
   return value.toISOString().slice(0, 10);
 }
+

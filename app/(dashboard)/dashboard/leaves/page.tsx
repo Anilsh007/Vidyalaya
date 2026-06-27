@@ -1,8 +1,8 @@
 import { CalendarCheck2, CalendarDays, Clock3, UserRoundCheck, UsersRound } from "lucide-react";
-import type { ReactNode } from "react";
 
 import { LeaveRequestForm, LeaveReviewForm } from "@/components/leaves/leave-forms";
 import { EmptyState } from "@/components/school/empty-state";
+import { InfoPanel, StatusBadge, SummaryCard, TableFrame } from "@/components/shared/dashboard-primitives";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
@@ -10,11 +10,12 @@ import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
 import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
-import { cn } from "@/lib/utils";
+import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 export default async function LeavesPage() {
   const session = await requirePermission(PERMISSIONS.viewLeaves);
   const canManageLeaves = session.permissions.includes(PERMISSIONS.manageLeaves);
+  const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "leaves");
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
@@ -61,7 +62,7 @@ export default async function LeavesPage() {
           <CardHeader>
             <CardTitle>{canManageLeaves ? "New leave request" : "Leave controls"}</CardTitle>
             <p className="text-sm leading-6 text-slate-600">
-              {canManageLeaves ? "Create student or staff leave requests with inclusive start and end dates." : "Your account can review leave records but cannot submit or approve requests."}
+              {canManageLeaves ? "Create student or staff leave requests with inclusive start and end dates." : accessCopy.summary}
             </p>
           </CardHeader>
           <CardContent>
@@ -71,7 +72,7 @@ export default async function LeavesPage() {
                 staff={staff.map((member) => ({ id: member.id, name: member.fullName, meta: member.designation }))}
               />
             ) : (
-              <EmptyState title="View-only access" description="Ask an administrator for leave management permission to submit or review leave requests." />
+              <EmptyState title={accessCopy.title} description={accessCopy.description} />
             )}
           </CardContent>
         </Card>
@@ -83,7 +84,7 @@ export default async function LeavesPage() {
           </CardHeader>
           <CardContent>
             {pendingLeaves.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <TableFrame>
                 <Table>
                   <THead><tr><TH>Requester</TH><TH>Dates</TH><TH>Type</TH><TH>Reason</TH><TH className="text-right">Action</TH></tr></THead>
                   <TBody>
@@ -98,7 +99,7 @@ export default async function LeavesPage() {
                     ))}
                   </TBody>
                 </Table>
-              </div>
+                </TableFrame>
             ) : (
               <EmptyState title="No pending leaves" description="All leave requests are reviewed at the moment." />
             )}
@@ -113,7 +114,7 @@ export default async function LeavesPage() {
         </CardHeader>
         <CardContent>
           {leaveRequests.length ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <TableFrame>
               <Table>
                 <THead><tr><TH>Requester</TH><TH>Leave type</TH><TH>Period</TH><TH>Reason</TH><TH>Status</TH><TH>Review</TH></tr></THead>
                 <TBody>
@@ -123,13 +124,13 @@ export default async function LeavesPage() {
                       <TD>{leave.leaveType}</TD>
                       <TD>{formatDate(leave.startDate)} to {formatDate(leave.endDate)}<p className="text-xs text-slate-500">{Number(leave.totalDays)} day(s)</p></TD>
                       <TD className="max-w-[300px]"><span className="line-clamp-2">{leave.reason}</span></TD>
-                      <TD><StatusBadge status={leave.status} /></TD>
+                      <TD><StatusBadge status={leave.status} toneMap={{ APPROVED: "bg-emerald-50 text-emerald-700", REJECTED: "bg-red-50 text-red-700", CANCELLED: "bg-slate-100 text-slate-600", PENDING: "bg-amber-50 text-amber-700" }} /></TD>
                       <TD className="max-w-[240px]"><span className="line-clamp-2 text-sm text-slate-600">{leave.reviewRemarks ?? (leave.reviewedAt ? `Reviewed on ${formatDate(leave.reviewedAt)}` : "Awaiting review")}</span></TD>
                     </tr>
                   ))}
                 </TBody>
               </Table>
-            </div>
+            </TableFrame>
           ) : (
             <EmptyState title="No leave requests" description="Submit the first request to start the leave register." />
           )}
@@ -137,30 +138,19 @@ export default async function LeavesPage() {
       </Card>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <InfoPanel title="Approval discipline" value={`${pendingLeaves.length} open`} description="Review pending requests daily so attendance and payroll teams can act on approved leave quickly." />
-        <InfoPanel title="Student coverage" value={`${studentLeaves.length} requests`} description="Student leave history is available for attendance reconciliation and parent communication." />
-        <InfoPanel title="Staff coverage" value={`${staffLeaves.length} requests`} description="Staff leave status gives principals and admins visibility into daily availability." />
+        <InfoPanel title="Approval discipline" value={`${pendingLeaves.length} open`} description="Review pending requests daily so attendance and payroll teams can act on approved leave quickly." icon={<CalendarDays className="h-5 w-5" />} />
+        <InfoPanel title="Student coverage" value={`${studentLeaves.length} requests`} description="Student leave history is available for attendance reconciliation and parent communication." icon={<CalendarDays className="h-5 w-5" />} />
+        <InfoPanel title="Staff coverage" value={`${staffLeaves.length} requests`} description="Staff leave status gives principals and admins visibility into daily availability." icon={<CalendarDays className="h-5 w-5" />} />
       </section>
     </div>
   );
-}
-
-function SummaryCard({ title, value, icon }: { title: string; value: string; icon: ReactNode }) {
-  return <Card><CardContent className="flex items-center justify-between gap-4 pt-6"><div><p className="text-sm text-slate-500">{title}</p><p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{value}</p></div><div className="rounded-2xl bg-brand-50 p-3 text-brand-700">{icon}</div></CardContent></Card>;
-}
-
-function InfoPanel({ title, value, description }: { title: string; value: string; description: string }) {
-  return <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-panel"><div className="mb-4 inline-flex rounded-2xl bg-slate-100 p-3 text-slate-700"><CalendarDays className="h-5 w-5" /></div><p className="text-sm font-medium text-slate-500">{title}</p><p className="mt-1 text-xl font-semibold text-slate-950">{value}</p><p className="mt-3 text-sm leading-6 text-slate-600">{description}</p></div>;
 }
 
 function RequesterCell({ name, type }: { name: string; type: string }) {
   return <div className="grid gap-1"><span className="font-medium text-slate-950">{name}</span><span className="text-xs uppercase tracking-[0.18em] text-slate-500">{type.toLowerCase()}</span></div>;
 }
 
-function StatusBadge({ status }: { status: string }) {
-  return <span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", status === "APPROVED" ? "bg-emerald-50 text-emerald-700" : status === "REJECTED" ? "bg-red-50 text-red-700" : status === "CANCELLED" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700")}>{status}</span>;
-}
-
 function formatDate(value: Date) {
   return value.toISOString().slice(0, 10);
 }
+

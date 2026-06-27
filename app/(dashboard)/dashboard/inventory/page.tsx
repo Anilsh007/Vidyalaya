@@ -1,9 +1,9 @@
 import { Archive, Boxes, ClipboardList, PackageMinus, PackagePlus, Search, TriangleAlert } from "lucide-react";
-import type { ReactNode } from "react";
 
 import { archiveInventoryItemAction } from "@/app/(dashboard)/dashboard/inventory/actions";
 import { EmptyState } from "@/components/school/empty-state";
 import { InventoryItemForm, InventoryMovementForm } from "@/components/inventory/inventory-forms";
+import { InfoPanel as PlanningPanel, SummaryCard, TableFrame } from "@/components/shared/dashboard-primitives";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import { requirePermission } from "@/lib/auth/access";
 import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/utils";
+import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -30,6 +31,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
   const category = asSingle(params.category) ?? "";
   const stock = asSingle(params.stock) ?? "";
   const canManageInventory = session.permissions.includes(PERMISSIONS.manageInventory);
+  const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "inventory");
 
   const [items, allItems, movements] = await Promise.all([
     db.inventoryItem.findMany({
@@ -105,14 +107,14 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
             <p className="text-sm leading-6 text-slate-600">
               {canManageInventory
                 ? "Add stock items with opening quantity, reorder level, supplier, and storage location."
-                : "Your account can review inventory, but cannot update stock records."}
+                : accessCopy.summary}
             </p>
           </CardHeader>
           <CardContent>
             {canManageInventory ? (
               <InventoryItemForm />
             ) : (
-              <EmptyState title="View-only access" description="Ask an administrator for inventory management permission to update records." />
+              <EmptyState title={accessCopy.title} description={accessCopy.description} />
             )}
           </CardContent>
         </Card>
@@ -153,7 +155,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
             </form>
 
             {filteredItems.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -222,7 +224,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
                     })}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : (
               <EmptyState title="No inventory items found" description="Adjust filters or create the first inventory item." />
             )}
@@ -251,8 +253,8 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
               />
             ) : (
               <EmptyState
-                title={canManageInventory ? "No items available" : "View-only access"}
-                description={canManageInventory ? "Create an inventory item before recording stock movement." : "You can review stock movement but cannot post entries."}
+                title={canManageInventory ? "No items available" : accessCopy.title}
+                description={canManageInventory ? "Create an inventory item before recording stock movement." : accessCopy.description}
               />
             )}
           </CardContent>
@@ -267,7 +269,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
           </CardHeader>
           <CardContent>
             {movements.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -292,7 +294,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
                     ))}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : (
               <EmptyState title="No stock movement" description="Stock movement records will appear here." />
             )}
@@ -309,23 +311,3 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
   );
 }
 
-function SummaryCard({ title, value, icon }: { title: string; value: string; icon: ReactNode }) {
-  return (
-    <div className="rounded-[24px] border border-slate-200/80 bg-white px-5 py-5 shadow-panel">
-      <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-brand-700">
-        {icon}
-      </div>
-      <p className="text-sm text-slate-500">{title}</p>
-      <p className="mt-1 text-2xl font-semibold text-slate-950">{value}</p>
-    </div>
-  );
-}
-
-function PlanningPanel({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="rounded-[24px] border border-slate-200 bg-white px-5 py-5 shadow-panel">
-      <p className="font-medium text-slate-950">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
-    </div>
-  );
-}

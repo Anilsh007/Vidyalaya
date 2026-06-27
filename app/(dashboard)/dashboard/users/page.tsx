@@ -1,14 +1,16 @@
-import { UserCog } from "lucide-react";
+import { RoleCode } from "@prisma/client";
 
-import { UserForm } from "@/components/school/user-form";
-import { EmptyState } from "@/components/school/empty-state";
+import { UserControlConsole } from "@/components/school/user-control-console";
 import { PageHeader } from "@/components/shared/page-header";
-import { Dialog } from "@/components/ui/dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
 import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
+import {
+  SPECIFIC_ROLE_DEFINITIONS,
+  getSpecificRoleLabel,
+  inferSpecificRoleKey,
+  type RoleCategory
+} from "@/lib/user-management";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -16,211 +18,166 @@ type Option = {
   id: string;
   label: string;
   meta?: string;
+  searchText?: string;
 };
 
-function asSingle(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function mergeCurrentOption(options: Option[], current?: Option | null) {
-  if (!current) {
-    return options;
-  }
-
-  return options.some((option) => option.id === current.id) ? options : [current, ...options];
-}
-
 export default async function UsersPage({ searchParams }: { searchParams: SearchParams }) {
+  void searchParams;
   const session = await requirePermission(PERMISSIONS.manageUsers);
-  const params = await searchParams;
-  const saved = asSingle(params.saved) === "1";
 
-  const [users, unlinkedStaff, unlinkedParents] = await Promise.all([
+  const [users, allStaff, allParents, students] = await Promise.all([
     db.user.findMany({
       where: { schoolId: session.schoolId },
       include: {
         roles: { include: { role: true } },
         staffProfile: true,
-        parentProfile: true
+        parentProfile: {
+          include: {
+            students: {
+              include: {
+                student: {
+                  include: {
+                    class: true,
+                    section: true
+                  }
+                }
+              },
+              orderBy: [{ isPrimary: "desc" }, { student: { fullName: "asc" } }]
+            }
+          }
+        }
       },
       orderBy: [{ fullName: "asc" }]
     }),
     db.staff.findMany({
-      where: { schoolId: session.schoolId, userId: null },
+      where: { schoolId: session.schoolId },
       orderBy: { fullName: "asc" }
     }),
     db.parent.findMany({
-      where: { schoolId: session.schoolId, userId: null },
+      where: { schoolId: session.schoolId },
+      include: {
+        students: {
+          include: {
+            student: {
+              include: {
+                class: true,
+                section: true
+              }
+            }
+          },
+          orderBy: [{ isPrimary: "desc" }, { student: { fullName: "asc" } }]
+        }
+      },
       orderBy: { guardianName: "asc" }
+    }),
+    db.student.findMany({
+      where: { schoolId: session.schoolId, isArchived: false, status: { not: "ARCHIVED" } },
+      include: {
+        class: true,
+        section: true
+      },
+      orderBy: [{ fullName: "asc" }]
     })
   ]);
 
-  const staffOptions: Option[] = unlinkedStaff.map((item) => ({
+  const staffOptions: Option[] = allStaff.map((item) => ({
     id: item.id,
     label: item.fullName,
-    meta: `${item.employeeCode}${item.isArchived ? " • Archived" : ""}`
+    meta: [item.employeeCode, item.designation, item.department].filter(Boolean).join(" | "),
+    searchText: [item.employeeCode, item.designation, item.department, item.email, item.phone].filter(Boolean).join(" ")
   }));
-  const parentOptions: Option[] = unlinkedParents.map((item) => ({
+
+  const parentOptions: Option[] = allParents.map((item) => ({
     id: item.id,
     label: item.guardianName,
-    meta: `${item.phonePrimary}${item.isArchived ? " • Archived" : ""}`
+    meta: [item.phonePrimary, item.students.length ? `${item.students.length} ward(s)` : "No wards yet"].join(" | "),
+    searchText: [item.guardianName, item.phonePrimary, item.email].filter(Boolean).join(" ")
   }));
+
+  const studentOptions: Option[] = students.map((item) => ({
+    id: item.id,
+    label: item.fullName,
+    meta: [item.admissionNumber, item.class?.name, item.section?.name].filter(Boolean).join(" | "),
+    searchText: [item.fullName, item.admissionNumber, item.rollNumber, item.class?.name, item.section?.name].filter(Boolean).join(" ")
+  }));
+
+  const userRows = users.map((user) => {
+    const roleCode = (user.roles[0]?.role.code ?? RoleCode.TEACHER) as RoleCode;
+    const specificRoleKey = inferSpecificRoleKey(roleCode, user.staffProfile?.designation, user.fullName);
+    const roleLabel = getSpecificRoleLabel(specificRoleKey, roleCode);
+    const roleCategory = SPECIFIC_ROLE_DEFINITIONS[specificRoleKey].category as RoleCategory;
+    const guessedStudent = students.find((student) => student.fullName === user.fullName);
+
+    const linkedProfileLabel =
+      user.staffProfile?.fullName
+        ? `Staff profile mapped to ${user.staffProfile.fullName}`
+        : user.parentProfile?.guardianName
+          ? `Parent profile mapped to ${user.parentProfile.guardianName}`
+          : guessedStudent && roleCode === RoleCode.STUDENT
+            ? `Student profile mapped to ${guessedStudent.fullName}`
+            : "No verified profile connection";
+
+    const linkedProfileSystemId =
+      user.staffProfile?.employeeCode
+        ? `STF-ID ${user.staffProfile.employeeCode}`
+        : user.parentProfile?.students[0]?.student.admissionNumber
+          ? `ADM-NO ${user.parentProfile.students[0].student.admissionNumber}`
+          : guessedStudent?.admissionNumber
+            ? `ADM-NO ${guessedStudent.admissionNumber}`
+            : null;
+
+    const linkedProfileBadgeTone: "success" | "warning" = linkedProfileSystemId ? "success" : "warning";
+    const linkedProfileBadgeLabel = linkedProfileSystemId ? "Verified Sync" : "Connection Pending - Click to pair";
+
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone ?? "",
+      roleLabel,
+      roleCode,
+      roleCategory,
+      specificRoleKey,
+      linkedProfileLabel,
+      linkedProfileSystemId,
+      linkedProfileBadgeLabel,
+      linkedProfileBadgeTone,
+      isActive: user.isActive,
+      staffId: user.staffProfile?.id ?? "",
+      parentId: user.parentProfile?.id ?? "",
+      studentId: guessedStudent?.id ?? "",
+      parentStudentIds: user.parentProfile?.students.map((entry) => entry.studentId) ?? []
+    };
+  });
 
   return (
     <div className="grid gap-6">
+      <PageHeader
+        eyebrow="Access Control"
+        title="User Control"
+        description="Provision school ERP identities with tiered role logic, profile compliance visibility, and one-click operational handover tools."
+      />
 
-
-      {saved ? (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          User account saved successfully.
-        </div>
-      ) : null}
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-brand-700">
-              <UserCog className="h-5 w-5" />
-            </div>
-            <div className="grid gap-1">
-              <CardTitle>Create a user account</CardTitle>
-              <p className="text-sm leading-6 text-slate-600">
-                The user can log in with the email and temporary password you set here, then update their own profile and password after first sign-in.
-              </p>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <UserForm submitLabel="Create user"
-            values={{
-              fullName: "",
-              email: "",
-              phone: "",
-              roleCode: "TEACHER",
-              status: "yes",
-              password: "",
-              staffId: "",
-              parentId: ""
-            }}
-            staffOptions={staffOptions}
-            parentOptions={parentOptions}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Existing accounts</CardTitle>
-          <p className="text-sm leading-6 text-slate-600">
-            View the people who can sign in, their roles, and whether a staff or parent profile is linked.
-          </p>
-        </CardHeader>
-        <CardContent>
-          {users.length ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <Table>
-                <THead>
-                  <tr>
-                    <TH>User</TH>
-                    <TH>Role</TH>
-                    <TH>Linked profile</TH>
-                    <TH>Status</TH>
-                    <TH className="text-right">Actions</TH>
-                  </tr>
-                </THead>
-                <TBody>
-                  {users.map((user) => {
-                    const roleSummary = user.roles.map((entry) => entry.role.name).join(", ") || "-";
-                    const linkedProfile =
-                      user.staffProfile?.fullName
-                        ? `Staff: ${user.staffProfile.fullName}`
-                        : user.parentProfile?.guardianName
-                          ? `Parent: ${user.parentProfile.guardianName}`
-                          : "Not linked";
-
-                    const editStaffOptions = mergeCurrentOption(
-                      staffOptions,
-                      user.staffProfile
-                        ? {
-                          id: user.staffProfile.id,
-                          label: user.staffProfile.fullName,
-                          meta: user.staffProfile.employeeCode
-                        }
-                        : null
-                    );
-                    const editParentOptions = mergeCurrentOption(
-                      parentOptions,
-                      user.parentProfile
-                        ? {
-                          id: user.parentProfile.id,
-                          label: user.parentProfile.guardianName,
-                          meta: user.parentProfile.phonePrimary
-                        }
-                        : null
-                    );
-
-                    return (
-                      <tr key={user.id}>
-                        <TD>
-                          <div className="grid gap-1">
-                            <span className="font-medium text-slate-950">{user.fullName}</span>
-                            <span className="text-xs text-slate-500">{user.email}</span>
-                          </div>
-                        </TD>
-                        <TD>{roleSummary}</TD>
-                        <TD>{linkedProfile}</TD>
-                        <TD>
-                          <span
-                            className={`rounded-full border px-3 py-1 text-xs font-medium ${user.isActive
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-slate-200 bg-slate-100 text-slate-600"
-                              }`}
-                          >
-                            {user.isActive ? "Active" : "Inactive"}
-                          </span>
-                        </TD>
-                        <TD>
-                          <div className="flex justify-end gap-2">
-                            <Dialog
-                              title={`Edit ${user.fullName}`}
-                              description="Update the user's role, login details, status, or linked profile."
-                              triggerLabel="Edit"
-                            >
-                              <UserForm
-                                title="Edit user"
-                                description="Update the login account and keep the linked profile in sync."
-                                submitLabel="Save changes"
-                                values={{
-                                  id: user.id,
-                                  fullName: user.fullName,
-                                  email: user.email,
-                                  phone: user.phone ?? "",
-                                  roleCode: user.roles[0]?.role.code ?? "TEACHER",
-                                  status: user.isActive ? "yes" : "no",
-                                  password: "",
-                                  staffId: user.staffProfile?.id ?? "",
-                                  parentId: user.parentProfile?.id ?? ""
-                                }}
-                                staffOptions={editStaffOptions}
-                                parentOptions={editParentOptions}
-                              />
-                            </Dialog>
-                          </div>
-                        </TD>
-                      </tr>
-                    );
-                  })}
-                </TBody>
-              </Table>
-            </div>
-          ) : (
-            <EmptyState
-              title="No user accounts yet"
-              description="Create the first login account so staff or parents can sign in."
-            />
-          )}
-        </CardContent>
-      </Card>
+      <UserControlConsole
+        users={userRows}
+        createValues={{
+          fullName: "",
+          email: "",
+          phone: "",
+          roleCategory: "ACADEMICS",
+          specificRoleKey: "TEACHER",
+          status: "yes",
+          password: "",
+          staffId: "",
+          parentId: "",
+          studentId: "",
+          parentStudentIds: [],
+          forcePasswordReset: "yes"
+        }}
+        staffOptions={staffOptions}
+        parentOptions={parentOptions}
+        studentOptions={studentOptions}
+      />
     </div>
   );
 }

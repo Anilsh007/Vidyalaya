@@ -1,10 +1,10 @@
 import { BookMarked, BookOpenCheck, Clock3, Search, WalletCards } from "lucide-react";
-import type { ReactNode } from "react";
 import { LibraryIssueStatus } from "@prisma/client";
 
 import { archiveLibraryBookAction } from "@/app/(dashboard)/dashboard/library/actions";
 import { EmptyState } from "@/components/school/empty-state";
 import { LibraryBookForm, LibraryIssueForm, LibraryReturnForm } from "@/components/library/library-forms";
+import { SummaryCard, TableFrame } from "@/components/shared/dashboard-primitives";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import { requirePermission } from "@/lib/auth/access";
 import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/utils";
+import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -31,6 +32,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
   const category = asSingle(params.category) ?? "";
   const availability = asSingle(params.availability) ?? "";
   const canManageLibrary = session.permissions.includes(PERMISSIONS.manageLibrary);
+  const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "library");
   const todayEnd = new Date();
   todayEnd.setUTCHours(23, 59, 59, 999);
 
@@ -117,14 +119,14 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
             <p className="text-sm leading-6 text-slate-600">
               {canManageLibrary
                 ? "Create catalogue records with copy counts and shelf locations before issuing books."
-                : "Your account can review the catalogue and circulation, but cannot update records."}
+                : accessCopy.summary}
             </p>
           </CardHeader>
           <CardContent>
             {canManageLibrary ? (
               <LibraryBookForm />
             ) : (
-              <EmptyState title="View-only access" description="Ask an administrator for library management permission to update records." />
+              <EmptyState title={accessCopy.title} description={accessCopy.description} />
             )}
           </CardContent>
         </Card>
@@ -165,7 +167,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
             </form>
 
             {books.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -207,7 +209,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
                     ))}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : (
               <EmptyState title="No books found" description="Adjust filters or add the first book to the library catalogue." />
             )}
@@ -243,8 +245,8 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
               />
             ) : (
               <EmptyState
-                title={canManageLibrary ? "No available books" : "View-only access"}
-                description={canManageLibrary ? "Add books or return issued copies before creating a new issue." : "You can view issue records but cannot issue books."}
+                title={canManageLibrary ? "No available books" : accessCopy.title}
+                description={canManageLibrary ? "Add books or return issued copies before creating a new issue." : accessCopy.description}
               />
             )}
           </CardContent>
@@ -259,7 +261,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
           </CardHeader>
           <CardContent>
             {activeIssues.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -307,7 +309,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
                     })}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : (
               <EmptyState title="No active issues" description="Issued books will appear here until they are returned." />
             )}
@@ -324,7 +326,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
         </CardHeader>
         <CardContent>
           {recentIssues.length ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <TableFrame>
               <Table>
                 <THead>
                   <tr>
@@ -347,7 +349,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
                   ))}
                 </TBody>
               </Table>
-            </div>
+            </TableFrame>
           ) : (
             <EmptyState title="No library activity" description="Issue and return records will appear here." />
           )}
@@ -357,14 +359,3 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
   );
 }
 
-function SummaryCard({ title, value, icon }: { title: string; value: string; icon: ReactNode }) {
-  return (
-    <div className="rounded-[24px] border border-slate-200/80 bg-white px-5 py-5 shadow-panel">
-      <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-brand-700">
-        {icon}
-      </div>
-      <p className="text-sm text-slate-500">{title}</p>
-      <p className="mt-1 text-2xl font-semibold text-slate-950">{value}</p>
-    </div>
-  );
-}

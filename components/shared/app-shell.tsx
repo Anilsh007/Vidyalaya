@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   BookOpenCheck,
   CalendarCheck2,
@@ -21,13 +21,14 @@ import {
   Menu,
   ChevronLeft,
   ChevronRight,
-  School
+  School,
+  ShieldAlert
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { logoutAction } from "@/lib/auth/actions";
 import { Button } from "@/components/ui/button";
-import { NAV_ITEMS } from "@/lib/copy";
+import { getVisibleNavItems } from "@/lib/dashboard-experience";
 import { cn } from "@/lib/utils";
 
 type AppShellProps = {
@@ -35,6 +36,7 @@ type AppShellProps = {
   schoolName: string;
   userLabel: string;
   permissions: string[];
+  roleHints: string[];
   children: ReactNode;
 };
 
@@ -43,18 +45,21 @@ export function AppShell({
   schoolName,
   userLabel,
   permissions,
+  roleHints,
   children
 }: AppShellProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   const visibleNavItems = useMemo(
-    () => NAV_ITEMS.filter((item) => !item.permission || permissions.includes(item.permission)),
-    [permissions]
+    () => getVisibleNavItems(permissions, roleHints),
+    [permissions, roleHints]
   );
+  const forbiddenRedirect = searchParams.get("forbidden") === "1";
 
   useEffect(() => {
     setMenuOpen(false);
@@ -320,7 +325,18 @@ export function AppShell({
             </header>
           )}
 
-          <main className="w-full min-w-0 px-4 py-6 sm:px-6 lg:px-8 bg-slate-50/30">{children}</main>
+          <main className="w-full min-w-0 px-4 py-6 sm:px-6 lg:px-8 bg-slate-50/30">
+            {forbiddenRedirect ? (
+              <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="grid gap-1">
+                  <p className="font-medium">This account cannot open that workspace.</p>
+                  <p>You were redirected to the nearest dashboard area allowed for your current role.</p>
+                </div>
+              </div>
+            ) : null}
+            {children}
+          </main>
         </div>
       </div>
     </div>

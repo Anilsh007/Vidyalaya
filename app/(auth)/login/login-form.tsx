@@ -98,13 +98,6 @@ export function LoginForm({ next }: LoginFormProps) {
                 required
               />
             </FormField>
-
-            {state.message ? (
-              <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {state.message}
-              </p>
-            ) : null}
-
             <Button type="submit" className="mt-2" disabled={isPending}>
               {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {LOGIN_COPY.submitLabel}

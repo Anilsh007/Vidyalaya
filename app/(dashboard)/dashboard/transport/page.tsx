@@ -1,8 +1,8 @@
 import { BusFront, MapPinned, Route, ShieldAlert, UsersRound } from "lucide-react";
-import type { ReactNode } from "react";
 
 import { archiveTransportRouteAction, archiveTransportVehicleAction } from "@/app/(dashboard)/dashboard/transport/actions";
 import { EmptyState } from "@/components/school/empty-state";
+import { InfoPanel as PlanningPanel, SummaryCard, TableFrame } from "@/components/shared/dashboard-primitives";
 import { PageHeader } from "@/components/shared/page-header";
 import {
   TransportAssignmentForm,
@@ -18,10 +18,12 @@ import { requirePermission } from "@/lib/auth/access";
 import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/utils";
+import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 export default async function TransportPage() {
   const session = await requirePermission(PERMISSIONS.viewTransport);
   const canManageTransport = session.permissions.includes(PERMISSIONS.manageTransport);
+  const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "transport");
   const today = new Date();
 
   const [vehicles, routes, stops, assignments, students] = await Promise.all([
@@ -89,11 +91,11 @@ export default async function TransportPage() {
           <CardHeader>
             <CardTitle>{canManageTransport ? "Add vehicle" : "Transport controls"}</CardTitle>
             <p className="text-sm leading-6 text-slate-600">
-              {canManageTransport ? "Register vehicles with driver, helper, capacity, insurance, and fitness dates." : "Your account can review transport records but cannot update them."}
+              {canManageTransport ? "Register vehicles with driver, helper, capacity, insurance, and fitness dates." : accessCopy.summary}
             </p>
           </CardHeader>
           <CardContent>
-            {canManageTransport ? <TransportVehicleForm /> : <EmptyState title="View-only access" description="Ask an administrator for transport management permission to update records." />}
+            {canManageTransport ? <TransportVehicleForm /> : <EmptyState title={accessCopy.title} description={accessCopy.description} />}
           </CardContent>
         </Card>
 
@@ -104,7 +106,7 @@ export default async function TransportPage() {
           </CardHeader>
           <CardContent>
             {vehicles.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -162,7 +164,7 @@ export default async function TransportPage() {
                     ))}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : <EmptyState title="No vehicles" description="Create the first transport vehicle to begin route planning." />}
           </CardContent>
         </Card>
@@ -182,7 +184,7 @@ export default async function TransportPage() {
                   <TransportStopForm routes={routes.map((route) => ({ id: route.id, code: route.code, name: route.name, monthlyFee: route.monthlyFee?.toString() ?? null }))} />
                 </div>
               </>
-            ) : <EmptyState title="View-only access" description="You can review routes but cannot create or edit them." />}
+            ) : <EmptyState title={accessCopy.title} description={accessCopy.description} />}
           </CardContent>
         </Card>
 
@@ -193,7 +195,7 @@ export default async function TransportPage() {
           </CardHeader>
           <CardContent>
             {routes.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -247,7 +249,7 @@ export default async function TransportPage() {
                     ))}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : <EmptyState title="No routes" description="Create routes and stops to begin student assignments." />}
           </CardContent>
         </Card>
@@ -266,7 +268,7 @@ export default async function TransportPage() {
                 routes={routes.map((route) => ({ id: route.id, code: route.code, name: route.name, monthlyFee: route.monthlyFee?.toString() ?? null }))}
                 stops={stops.map((stop) => ({ id: stop.id, routeId: stop.routeId, name: `${stop.route.code} - ${stop.name}` }))}
               />
-            ) : <EmptyState title={canManageTransport ? "Routes required" : "View-only access"} description={canManageTransport ? "Create at least one route before assigning students." : "You can review assignments but cannot create them."} />}
+            ) : <EmptyState title={canManageTransport ? "Routes required" : accessCopy.title} description={canManageTransport ? "Create at least one route before assigning students." : accessCopy.description} />}
           </CardContent>
         </Card>
 
@@ -277,7 +279,7 @@ export default async function TransportPage() {
           </CardHeader>
           <CardContent>
             {assignments.length ? (
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <TableFrame>
                 <Table>
                   <THead>
                     <tr>
@@ -300,7 +302,7 @@ export default async function TransportPage() {
                     ))}
                   </TBody>
                 </Table>
-              </div>
+              </TableFrame>
             ) : <EmptyState title="No assignments" description="Assigned transport students will appear here." />}
           </CardContent>
         </Card>
@@ -315,23 +317,3 @@ export default async function TransportPage() {
   );
 }
 
-function SummaryCard({ title, value, icon }: { title: string; value: string; icon: ReactNode }) {
-  return (
-    <div className="rounded-[24px] border border-slate-200/80 bg-white px-5 py-5 shadow-panel">
-      <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-brand-700">
-        {icon}
-      </div>
-      <p className="text-sm text-slate-500">{title}</p>
-      <p className="mt-1 text-2xl font-semibold text-slate-950">{value}</p>
-    </div>
-  );
-}
-
-function PlanningPanel({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="rounded-[24px] border border-slate-200 bg-white px-5 py-5 shadow-panel">
-      <p className="font-medium text-slate-950">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
-    </div>
-  );
-}

@@ -1,26 +1,39 @@
-import { CheckCircle2, CircleAlert } from "lucide-react";
+"use client";
 
+import { useEffect, useRef } from "react";
+
+import { useToast } from "@/components/ui/toast";
 import type { ActionFormState } from "@/lib/forms";
 
 export function FormStateMessage({ state }: { state: ActionFormState }) {
+  const { pushToast } = useToast();
+  const lastToastKeyRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!state.message || state.status === "idle") {
+      return;
+    }
+
+    const nextKey = `${state.status}:${state.message}`;
+    if (lastToastKeyRef.current === nextKey) {
+      return;
+    }
+
+    pushToast({
+      title: state.status === "success" ? "Action completed" : "Action failed",
+      description: state.message,
+      tone: state.status === "success" ? "success" : "error"
+    });
+    lastToastKeyRef.current = nextKey;
+  }, [pushToast, state.message, state.status]);
+
   if (!state.message || state.status === "idle") {
     return null;
   }
 
-  const toneClass =
-    state.status === "success"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-      : "border-red-200 bg-red-50 text-red-900";
-  const Icon = state.status === "success" ? CheckCircle2 : CircleAlert;
-
   return (
-    <p
-      role="status"
-      aria-live="polite"
-      className={`flex items-start gap-2 rounded-2xl border px-4 py-3 text-sm ${toneClass}`}
-    >
-      <Icon className="mt-0.5 h-4 w-4 shrink-0" />
-      <span>{state.message}</span>
+    <p role="status" aria-live="polite" className="sr-only">
+      {state.message}
     </p>
   );
 }

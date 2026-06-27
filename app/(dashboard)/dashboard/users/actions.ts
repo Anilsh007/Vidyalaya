@@ -2,7 +2,6 @@
 
 import { RoleCode, type Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 
 import { requirePermission } from "@/lib/auth/access";
 import { hashPassword } from "@/lib/auth/password";
@@ -11,10 +10,11 @@ import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
 import { PERMISSIONS } from "@/lib/permissions";
 import {
-  linkedProfileTypeForRole,
+  getSpecificRoleDefinition,
   roleCodeToUserType,
   userAccountSchema
 } from "@/lib/user-management";
+import { getCurrentAcademicYear } from "@/lib/school";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -24,11 +24,136 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+function normalizePhone(phone: string | null | undefined) {
+  return (phone ?? "").replace(/\D+/g, "");
+}
+
+async function resolveAutoLinkedIds(
+  tx: Prisma.TransactionClient,
+  schoolId: string,
+  linkedProfileType: string,
+  fullName: string,
+  email: string,
+  phone: string | null,
+  staffId?: string,
+  parentId?: string
+) {
+  const normalizedPhone = normalizePhone(phone);
+
+  if (linkedProfileType === "staff" && !staffId) {
+    const candidates = await tx.staff.findMany({
+      where: { schoolId, userId: null, isArchived: false },
+      select: { id: true, fullName: true, email: true, phone: true }
+    });
+
+    const exactMatch =
+      candidates.find((item) => item.email && normalizeEmail(item.email) === email) ??
+      (normalizedPhone
+        ? candidates.find((item) => normalizePhone(item.phone) === normalizedPhone)
+        : undefined) ??
+      candidates.find((item) => item.fullName.trim().toLowerCase() === fullName.trim().toLowerCase());
+
+    if (exactMatch) {
+      staffId = exactMatch.id;
+    }
+  }
+
+  if (linkedProfileType === "parent" && !parentId) {
+    const candidates = await tx.parent.findMany({
+      where: { schoolId, userId: null, isArchived: false },
+      select: { id: true, guardianName: true, email: true, phonePrimary: true }
+    });
+
+    const exactMatch =
+      candidates.find((item) => item.email && normalizeEmail(item.email) === email) ??
+      (normalizedPhone
+        ? candidates.find((item) => normalizePhone(item.phonePrimary) === normalizedPhone)
+        : undefined) ??
+      candidates.find((item) => item.guardianName.trim().toLowerCase() === fullName.trim().toLowerCase());
+
+    if (exactMatch) {
+      parentId = exactMatch.id;
+    }
+  }
+
+  return { staffId, parentId };
+}
+
+async function ensureStaffProfile(
+  tx: Prisma.TransactionClient,
+  schoolId: string,
+  roleCode: RoleCode,
+  specificRoleLabel: string,
+  fullName: string,
+  email: string,
+  phone: string | null,
+  staffId?: string
+) {
+  if (staffId) {
+    return staffId;
+  }
+
+  const academicYear = await getCurrentAcademicYear(schoolId);
+  if (!academicYear) {
+    throw new Error("Set a current academic year before creating user accounts for staff roles.");
+  }
+
+  const nextCount = await tx.staff.count({ where: { schoolId } });
+  const employeeCode = buildEmployeeCode(roleCode, nextCount + 1);
+  const designation = roleCodeToDesignation(roleCode);
+
+  const createdStaff = await tx.staff.create({
+    data: {
+      schoolId,
+      academicYearId: academicYear.id,
+      employeeCode,
+      fullName,
+      designation: specificRoleLabel || designation,
+      joiningDate: new Date(),
+      phone,
+      email,
+      isTeachingStaff:
+        roleCode === RoleCode.TEACHER || roleCode === RoleCode.PRINCIPAL || specificRoleLabel === "Exam Controller"
+    }
+  });
+
+  return createdStaff.id;
+}
+
+function buildEmployeeCode(roleCode: RoleCode, sequence: number) {
+  const prefixMap: Record<RoleCode, string> = {
+    SUPER_ADMIN: "ADM",
+    ADMIN: "ADM",
+    PRINCIPAL: "PRI",
+    TEACHER: "TCH",
+    ACCOUNTANT: "ACC",
+    STUDENT: "STD",
+    PARENT: "PAR"
+  };
+
+  return `${prefixMap[roleCode]}-${sequence.toString().padStart(4, "0")}`;
+}
+
+function roleCodeToDesignation(roleCode: RoleCode) {
+  const designationMap: Record<RoleCode, string> = {
+    SUPER_ADMIN: "Administrator",
+    ADMIN: "Administrator",
+    PRINCIPAL: "Principal",
+    TEACHER: "Teacher",
+    ACCOUNTANT: "Accountant",
+    STUDENT: "Student",
+    PARENT: "Parent"
+  };
+
+  return designationMap[roleCode];
+}
+
 async function setLinkedProfile(
   tx: Prisma.TransactionClient,
   userId: string,
   schoolId: string,
   linkedProfileType: string,
+  specificRoleLabel: string,
   accountFullName: string,
   accountEmail: string,
   accountPhone: string | null,
@@ -55,7 +180,7 @@ async function setLinkedProfile(
   if (linkedProfileType === "staff" && staffId) {
     const staff = await tx.staff.findFirst({
       where: { id: staffId, schoolId },
-      select: { id: true, userId: true, fullName: true, phone: true, email: true }
+      select: { id: true, userId: true, fullName: true, designation: true, phone: true, email: true }
     });
 
     if (!staff) {
@@ -71,6 +196,7 @@ async function setLinkedProfile(
       data: {
         userId,
         fullName: accountFullName,
+        designation: specificRoleLabel || staff.designation,
         phone: accountPhone ?? staff.phone,
         email: accountEmail
       }
@@ -103,6 +229,58 @@ async function setLinkedProfile(
   }
 }
 
+async function syncParentStudents(
+  tx: Prisma.TransactionClient,
+  schoolId: string,
+  parentId: string,
+  selectedStudentIds: string[]
+) {
+  const students = await tx.student.findMany({
+    where: {
+      schoolId,
+      id: { in: selectedStudentIds },
+      isArchived: false
+    },
+    select: { id: true }
+  });
+
+  if (students.length !== selectedStudentIds.length) {
+    throw new Error("One or more selected students could not be found.");
+  }
+
+  const currentLinks = await tx.studentGuardian.findMany({
+    where: { parentId },
+    select: { id: true, studentId: true, isPrimary: true }
+  });
+
+  const selectedSet = new Set(selectedStudentIds);
+
+  for (const link of currentLinks) {
+    if (!selectedSet.has(link.studentId)) {
+      await tx.studentGuardian.delete({ where: { id: link.id } });
+    }
+  }
+
+  for (const [index, studentId] of selectedStudentIds.entries()) {
+    const existing = currentLinks.find((link) => link.studentId === studentId);
+    if (!existing) {
+      await tx.studentGuardian.create({
+        data: {
+          parentId,
+          studentId,
+          isPrimary: index === 0
+        }
+      });
+      continue;
+    }
+
+    await tx.studentGuardian.update({
+      where: { id: existing.id },
+      data: { isPrimary: index === 0 }
+    });
+  }
+}
+
 export async function saveUserAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
@@ -114,12 +292,17 @@ export async function saveUserAction(
     fullName: getString(formData, "fullName"),
     email: getString(formData, "email"),
     phone: getString(formData, "phone"),
-    roleCode: getString(formData, "roleCode"),
+    roleCategory: getString(formData, "roleCategory"),
+    specificRoleKey: getString(formData, "specificRoleKey"),
+    roleCode: getString(formData, "roleCode") || undefined,
     status: getString(formData, "status") === "no" ? "no" : "yes",
     password: getString(formData, "password"),
+    forcePasswordReset: getString(formData, "forcePasswordReset") === "yes" ? "yes" : "no",
     linkedProfileType: getString(formData, "linkedProfileType") || "none",
     staffId: getString(formData, "staffId") || undefined,
-    parentId: getString(formData, "parentId") || undefined
+    parentId: getString(formData, "parentId") || undefined,
+    studentId: getString(formData, "studentId") || undefined,
+    parentStudentIds: formData.getAll("parentStudentIds").map((value) => String(value)).filter(Boolean)
   });
 
   if (!parsed.success) {
@@ -132,8 +315,17 @@ export async function saveUserAction(
 
   const data = parsed.data;
   const email = normalizeEmail(data.email);
-  const roleCode = data.roleCode as RoleCode;
-  const linkedProfileType = linkedProfileTypeForRole(roleCode);
+  const specificRole = getSpecificRoleDefinition(data.specificRoleKey);
+  if (!specificRole) {
+    return { status: "error", message: "Selected role configuration is invalid." };
+  }
+  const roleCode = specificRole.roleCode as RoleCode;
+  const linkedProfileType = specificRole.linkedProfileType;
+  const specificRoleLabel = specificRole.label;
+  let studentMatchLabel: string | null = null;
+  let linkedProfileBadgeLabel: string | null = null;
+  let linkedProfileBadgeTone: "success" | "warning" = "warning";
+  let linkedProfileSystemId: string | null = null;
 
   try {
     const user = await db.$transaction(async (tx) => {
@@ -143,6 +335,53 @@ export async function saveUserAction(
 
       if (!role) {
         throw new Error("Role was not found for this school.");
+      }
+
+      if (linkedProfileType === "student" && data.studentId) {
+        const studentMatch = await tx.student.findFirst({
+          where: {
+            id: data.studentId,
+            schoolId: session.schoolId,
+            isArchived: false
+          },
+          include: {
+            class: { select: { name: true } },
+            section: { select: { name: true } }
+          }
+        });
+
+        if (!studentMatch) {
+          throw new Error("Selected student admission record was not found.");
+        }
+
+        studentMatchLabel = `${studentMatch.fullName} (${studentMatch.admissionNumber})`;
+        linkedProfileBadgeLabel = "Verified Sync";
+        linkedProfileBadgeTone = "success";
+        linkedProfileSystemId = `ADM-NO ${studentMatch.admissionNumber}`;
+      }
+
+      const resolvedLinks = await resolveAutoLinkedIds(
+        tx,
+        session.schoolId,
+        linkedProfileType,
+        data.fullName,
+        email,
+        data.phone || null,
+        data.staffId,
+        data.parentId
+      );
+
+      if (linkedProfileType === "staff") {
+        resolvedLinks.staffId = await ensureStaffProfile(
+          tx,
+          session.schoolId,
+          roleCode,
+          specificRoleLabel,
+          data.fullName,
+          email,
+          data.phone || null,
+          resolvedLinks.staffId
+        );
       }
 
       const emailConflict = await tx.user.findFirst({
@@ -198,12 +437,46 @@ export async function saveUserAction(
           updated.id,
           session.schoolId,
           linkedProfileType,
+          specificRoleLabel,
           updated.fullName,
           updated.email,
           updated.phone,
-          data.staffId,
-          data.parentId
+          resolvedLinks.staffId,
+          resolvedLinks.parentId
         );
+
+        if (linkedProfileType === "parent" && resolvedLinks.parentId && data.parentStudentIds.length > 0) {
+          await syncParentStudents(tx, session.schoolId, resolvedLinks.parentId, data.parentStudentIds);
+          linkedProfileBadgeLabel = "Verified Sync";
+          linkedProfileBadgeTone = "success";
+        }
+
+        if (linkedProfileType === "staff" && resolvedLinks.staffId) {
+          const staff = await tx.staff.findUnique({
+            where: { id: resolvedLinks.staffId },
+            select: { employeeCode: true }
+          });
+          linkedProfileSystemId = staff?.employeeCode ? `STF-ID ${staff.employeeCode}` : null;
+          linkedProfileBadgeLabel = "Verified Sync";
+          linkedProfileBadgeTone = "success";
+        }
+
+        if (linkedProfileType === "parent" && resolvedLinks.parentId) {
+          const parent = await tx.parent.findUnique({
+            where: { id: resolvedLinks.parentId },
+            include: {
+              students: {
+                include: {
+                  student: { select: { admissionNumber: true } }
+                },
+                orderBy: [{ isPrimary: "desc" }]
+              }
+            }
+          });
+          linkedProfileSystemId = parent?.students[0]?.student.admissionNumber
+            ? `ADM-NO ${parent.students[0].student.admissionNumber}`
+            : null;
+        }
 
         return updated;
       }
@@ -236,12 +509,46 @@ export async function saveUserAction(
         created.id,
         session.schoolId,
         linkedProfileType,
+        specificRoleLabel,
         created.fullName,
         created.email,
         created.phone,
-        data.staffId,
-        data.parentId
+        resolvedLinks.staffId,
+        resolvedLinks.parentId
       );
+
+      if (linkedProfileType === "parent" && resolvedLinks.parentId && data.parentStudentIds.length > 0) {
+        await syncParentStudents(tx, session.schoolId, resolvedLinks.parentId, data.parentStudentIds);
+        linkedProfileBadgeLabel = "Verified Sync";
+        linkedProfileBadgeTone = "success";
+      }
+
+      if (linkedProfileType === "staff" && resolvedLinks.staffId) {
+        const staff = await tx.staff.findUnique({
+          where: { id: resolvedLinks.staffId },
+          select: { employeeCode: true }
+        });
+        linkedProfileSystemId = staff?.employeeCode ? `STF-ID ${staff.employeeCode}` : null;
+        linkedProfileBadgeLabel = "Verified Sync";
+        linkedProfileBadgeTone = "success";
+      }
+
+      if (linkedProfileType === "parent" && resolvedLinks.parentId) {
+        const parent = await tx.parent.findUnique({
+          where: { id: resolvedLinks.parentId },
+          include: {
+            students: {
+              include: {
+                student: { select: { admissionNumber: true } }
+              },
+              orderBy: [{ isPrimary: "desc" }]
+            }
+          }
+        });
+        linkedProfileSystemId = parent?.students[0]?.student.admissionNumber
+          ? `ADM-NO ${parent.students[0].student.admissionNumber}`
+          : null;
+      }
 
       return created;
     });
@@ -256,7 +563,13 @@ export async function saveUserAction(
         fullName: user.fullName,
         email: user.email,
         roleCode,
-        isActive: data.status === "yes"
+        specificRoleKey: data.specificRoleKey,
+        specificRoleLabel,
+        isActive: data.status === "yes",
+        forcePasswordReset: data.forcePasswordReset === "yes",
+        studentId: data.studentId ?? null,
+        studentMatchLabel,
+        parentStudentIds: data.parentStudentIds
       }
     });
 
@@ -266,7 +579,29 @@ export async function saveUserAction(
     if (data.staffId) {
       revalidatePath(`/dashboard/staff/${data.staffId}`);
     }
-    redirect("/dashboard/users?saved=1");
+    return {
+      status: "success",
+      message: data.id ? "User account updated successfully." : "User account created successfully.",
+      meta: {
+        handover: {
+          userId: user.id,
+          fullName: user.fullName,
+          phone: data.phone || "",
+          email: user.email,
+          roleCode,
+          specificRoleKey: data.specificRoleKey,
+          roleLabel: specificRoleLabel,
+          username: data.phone || user.email,
+          temporaryPassword: data.password || "",
+          linkedProfileType,
+          linkedProfileBadgeLabel:
+            linkedProfileBadgeLabel ??
+            (linkedProfileType === "none" ? "Verified Sync" : "Connection Pending - Click to pair"),
+          linkedProfileBadgeTone: linkedProfileType === "none" ? "success" : linkedProfileBadgeTone,
+          linkedProfileSystemId: linkedProfileSystemId ?? studentMatchLabel
+        }
+      }
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save the user account.";
     return { status: "error", message };
