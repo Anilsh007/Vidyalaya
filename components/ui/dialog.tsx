@@ -83,40 +83,29 @@ export function Dialog({
         </Button>
       ) : null}
       {isOpen ? (
-        <div
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
-          onClick={handleClose}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            aria-describedby={description ? descriptionId : undefined}
-            className={cn(
-              "max-h-[90vh] w-[min(92vw,720px)] overflow-y-auto rounded-[28px] border border-slate-200 bg-white p-0 shadow-2xl",
-              widthClassName
-            )}
-            onClick={(event) => event.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
+          onClick={handleClose} >
+          <div role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined}
+            className={cn("max-h-[90vh] w-[min(92vw,720px)] overflow-y-auto rounded-[28px] border border-slate-200 bg-white p-0 shadow-2xl",
+              widthClassName)} onClick={(event) => event.stopPropagation()} >
             <div className="grid gap-4 p-6 sm:p-7">
-              <div className="grid gap-1">
-                <h3 id={titleId} className="text-lg font-semibold text-slate-950">
-                  {title}
-                </h3>
-                {description ? (
-                  <p id={descriptionId} className="text-sm text-slate-600">
-                    {description}
-                  </p>
-                ) : null}
+              <div className="flex justify-between gap-1">
+                <div>
+                  <h3 id={titleId} className="text-lg font-semibold text-slate-950">
+                    {title}
+                  </h3>
+                  {description ? (
+                    <p id={descriptionId} className="text-sm text-slate-600">
+                      {description}
+                    </p>
+                  ) : null}
+                </div>
+
+                <Button variant="secondary" onClick={handleClose}>
+                  Close
+                </Button>
               </div>
               {children}
-              <div className="flex justify-end border-t border-slate-200 pt-4">
-                {footer ?? (
-                  <Button variant="secondary" onClick={handleClose}>
-                    Close
-                  </Button>
-                )}
-              </div>
             </div>
           </div>
         </div>

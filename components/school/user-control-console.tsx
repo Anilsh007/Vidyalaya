@@ -662,7 +662,7 @@ function UserAccountDialog({
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-3 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
             <Button variant="secondary" onClick={onHandoverToggle}>
               Select for handover
             </Button>
