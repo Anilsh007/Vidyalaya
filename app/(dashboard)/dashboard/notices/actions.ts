@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { noticeSchema } from "@/lib/notices";
-import { PERMISSIONS } from "@/lib/permissions";
+import { requireAnyPermission, requirePermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { saveNoticeRecord, toggleNoticePublish } from "@/lib/services/notices.service";
+import { noticeSchema } from "@/lib/validations/notices";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -18,32 +18,16 @@ function getOptionalString(formData: FormData, key: string) {
   return value || undefined;
 }
 
-function buildAudienceLabel(input: {
-  audienceType: string;
-  roleCode?: string;
-  className?: string;
-  sectionName?: string;
-}) {
-  if (input.audienceType === "ROLE") {
-    return input.roleCode?.replaceAll("_", " ") ?? "Role";
-  }
-
-  if (input.audienceType === "CLASS") {
-    return input.className ?? "Class";
-  }
-
-  if (input.audienceType === "SECTION") {
-    return input.sectionName ?? "Section";
-  }
-
-  return input.audienceType.replaceAll("_", " ");
-}
-
 export async function saveNoticeAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageNotices);
+  const isEditing = Boolean(getOptionalString(formData, "id"));
+  const session = await requireAnyPermission(
+    isEditing
+      ? [RBAC_PERMISSIONS.noticesUpdate]
+      : [RBAC_PERMISSIONS.noticesCreate, RBAC_PERMISSIONS.noticesUpdate]
+  );
   const parsed = noticeSchema.safeParse({
     id: getOptionalString(formData, "id"),
     title: getString(formData, "title"),
@@ -64,108 +48,60 @@ export async function saveNoticeAction(
     };
   }
 
-  const data = parsed.data;
-  const [schoolClass, section] = await Promise.all([
-    data.classId
-      ? db.schoolClass.findFirst({
-          where: { id: data.classId, schoolId: session.schoolId }
-        })
-      : Promise.resolve(null),
-    data.sectionId
-      ? db.section.findFirst({
-          where: { id: data.sectionId, schoolId: session.schoolId }
-        })
-      : Promise.resolve(null)
-  ]);
+  try {
+    const result = await saveNoticeRecord({
+      schoolId: session.schoolId,
+      createdById: session.userId,
+      ...parsed.data
+    });
 
-  const audienceLabel = buildAudienceLabel({
-    audienceType: data.audienceType,
-    roleCode: data.roleCode,
-    className: schoolClass?.name ?? undefined,
-    sectionName: section?.name ?? undefined
-  });
+    await recordAuditLog({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: parsed.data.id ? "notice.updated" : "notice.created",
+      entityType: "Notice",
+      entityId: result.notice.id,
+      metadata: {
+        audienceType: parsed.data.audienceType,
+        audienceLabel: result.audienceLabel,
+        noticeType: parsed.data.noticeType
+      }
+    });
 
-  const notice = data.id
-    ? await db.notice.update({
-        where: { id: data.id },
-        data: {
-          title: data.title,
-          body: data.body,
-          audienceType: data.audienceType,
-          audienceLabel,
-          roleCode: data.roleCode || null,
-          classId: data.classId || null,
-          sectionId: data.sectionId || null,
-          noticeType: data.noticeType,
-          expiresAt: data.expiresAt ? new Date(`${data.expiresAt}T23:59:59.999Z`) : null
-        }
-      })
-    : await db.notice.create({
-        data: {
-          schoolId: session.schoolId,
-          title: data.title,
-          body: data.body,
-          audienceType: data.audienceType,
-          audienceLabel,
-          roleCode: data.roleCode || null,
-          classId: data.classId || null,
-          sectionId: data.sectionId || null,
-          noticeType: data.noticeType,
-          expiresAt: data.expiresAt ? new Date(`${data.expiresAt}T23:59:59.999Z`) : null,
-          createdById: session.userId
-        }
-      });
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/notices");
 
-  await recordAuditLog({
-    actorUserId: session.userId,
-    schoolId: session.schoolId,
-    action: data.id ? "notice.updated" : "notice.created",
-    entityType: "Notice",
-    entityId: notice.id,
-    metadata: {
-      audienceType: data.audienceType,
-      audienceLabel,
-      noticeType: data.noticeType
-    }
-  });
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/notices");
-
-  return {
-    status: "success",
-    message: data.id ? "Notice updated." : "Notice created."
-  };
+    return {
+      status: "success",
+      message: parsed.data.id ? "Notice updated." : "Notice created."
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to save notice."
+    };
+  }
 }
 
 export async function toggleNoticePublishAction(formData: FormData) {
-  const session = await requirePermission(PERMISSIONS.manageNotices);
+  const session = await requirePermission(RBAC_PERMISSIONS.noticesPublish);
   const noticeId = getString(formData, "noticeId");
-
-  const notice = await db.notice.findFirst({
-    where: { id: noticeId, schoolId: session.schoolId }
-  });
-
-  if (!notice) {
+  if (!noticeId) {
     return;
   }
 
-  const isPublishing = !notice.isPublished;
-
-  await db.notice.update({
-    where: { id: notice.id },
-    data: {
-      isPublished: isPublishing,
-      publishedAt: isPublishing ? new Date() : null
-    }
-  });
+  const result = await toggleNoticePublish({ schoolId: session.schoolId, noticeId });
+  if (!result) {
+    return;
+  }
 
   await recordAuditLog({
     actorUserId: session.userId,
     schoolId: session.schoolId,
-    action: isPublishing ? "notice.published" : "notice.unpublished",
+    action: result.isPublishing ? "notice.published" : "notice.updated",
     entityType: "Notice",
-    entityId: notice.id
+    entityId: result.notice.id,
+    metadata: { isPublished: result.isPublishing }
   });
 
   revalidatePath("/dashboard");

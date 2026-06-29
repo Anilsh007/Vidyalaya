@@ -1,6 +1,5 @@
 "use client";
 
-import { NoticeAudienceType } from "@prisma/client";
 import { useActionState } from "react";
 
 import { saveNoticeAction } from "@/app/(dashboard)/dashboard/notices/actions";
@@ -11,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
+import { NOTICE_AUDIENCE_TYPES, type ClientNoticeAudienceType } from "@/lib/constants/client-enums";
 import { initialActionFormState } from "@/lib/forms";
 
 type Option = { id: string; name: string };
@@ -28,7 +28,7 @@ export function NoticeForm({
     id?: string;
     title?: string;
     body?: string;
-    audienceType?: NoticeAudienceType;
+    audienceType?: ClientNoticeAudienceType;
     roleCode?: string | null;
     classId?: string | null;
     sectionId?: string | null;
@@ -58,12 +58,12 @@ export function NoticeForm({
             <Select
               id={`notice-audience-${defaultValues?.id ?? "new"}`}
               name="audienceType"
-              defaultValue={defaultValues?.audienceType ?? NoticeAudienceType.ALL}
+              defaultValue={defaultValues?.audienceType ?? NOTICE_AUDIENCE_TYPES.ALL}
             >
-              <option value={NoticeAudienceType.ALL}>All</option>
-              <option value={NoticeAudienceType.ROLE}>Role</option>
-              <option value={NoticeAudienceType.CLASS}>Class</option>
-              <option value={NoticeAudienceType.SECTION}>Section</option>
+              <option value={NOTICE_AUDIENCE_TYPES.ALL}>All</option>
+              <option value={NOTICE_AUDIENCE_TYPES.ROLE}>Role</option>
+              <option value={NOTICE_AUDIENCE_TYPES.CLASS}>Class</option>
+              <option value={NOTICE_AUDIENCE_TYPES.SECTION}>Section</option>
             </Select>
           </FormField>
           <FieldError error={state.fieldErrors?.audienceType} />

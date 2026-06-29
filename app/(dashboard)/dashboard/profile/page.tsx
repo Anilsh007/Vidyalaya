@@ -27,6 +27,12 @@ export default async function ProfilePage({ searchParams }: { searchParams: Sear
           academicYear: true
         }
       },
+      studentProfile: {
+        include: {
+          class: true,
+          section: true
+        }
+      },
       parentProfile: true
     }
   });
@@ -38,6 +44,8 @@ export default async function ProfilePage({ searchParams }: { searchParams: Sear
   const roleSummary = user.roles.map((entry) => entry.role.name).join(", ") || "-";
   const linkedProfile = user.staffProfile
     ? `Staff: ${user.staffProfile.fullName}`
+    : user.studentProfile
+      ? `Student: ${user.studentProfile.fullName}`
     : user.parentProfile
       ? `Parent: ${user.parentProfile.guardianName}`
       : "No linked profile";
@@ -107,6 +115,19 @@ export default async function ProfilePage({ searchParams }: { searchParams: Sear
                   {user.parentProfile.guardianName}
                 </p>
                 <p className="mt-1 text-sm text-slate-600">{user.parentProfile.phonePrimary}</p>
+              </div>
+            ) : null}
+            {user.studentProfile ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                  Student profile
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">
+                  {user.studentProfile.fullName}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {[user.studentProfile.class?.name, user.studentProfile.section?.name].filter(Boolean).join(" - ") || "Class not assigned"}
+                </p>
               </div>
             ) : null}
             <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm text-blue-900">

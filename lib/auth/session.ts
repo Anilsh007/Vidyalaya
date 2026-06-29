@@ -3,8 +3,11 @@ import { redirect } from "next/navigation";
 
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
-
-const encoder = new TextEncoder();
+import {
+  createSignedSessionCookieValue,
+  SESSION_TTL_MS,
+  verifySignedSessionCookieValue
+} from "@/lib/auth/security";
 
 export type AppSession = {
   userId: string;
@@ -13,40 +16,6 @@ export type AppSession = {
   permissions: string[];
   expiresAt: number;
 };
-
-function toBase64Url(value: string) {
-  return Buffer.from(value).toString("base64url");
-}
-
-function fromBase64Url<T>(value: string): T {
-  return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as T;
-}
-
-async function importSessionKey() {
-  return crypto.subtle.importKey(
-    "raw",
-    encoder.encode(env.SESSION_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"]
-  );
-}
-
-async function signPayload(payload: string) {
-  const key = await importSessionKey();
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
-  return Buffer.from(signature).toString("base64url");
-}
-
-async function verifySignature(payload: string, signature: string) {
-  const key = await importSessionKey();
-  return crypto.subtle.verify(
-    "HMAC",
-    key,
-    Buffer.from(signature, "base64url"),
-    encoder.encode(payload)
-  );
-}
 
 async function buildUserSession(userId: string, expiresAt?: number) {
   const user = await db.user.findUnique({
@@ -86,7 +55,7 @@ async function buildUserSession(userId: string, expiresAt?: number) {
     schoolId: user.schoolId,
     roles,
     permissions,
-    expiresAt: expiresAt ?? Date.now() + 1000 * 60 * 60 * 10
+    expiresAt: expiresAt ?? Date.now() + SESSION_TTL_MS
   } satisfies AppSession;
 }
 
@@ -95,48 +64,30 @@ async function hydrateSession(session: AppSession) {
 }
 
 export async function createSessionCookieValue(session: AppSession) {
-  const payload = toBase64Url(JSON.stringify(session));
-  const signature = await signPayload(payload);
-  return `${payload}.${signature}`;
+  return createSignedSessionCookieValue(session, env.SESSION_SECRET);
 }
 
 export async function parseSessionCookie(value: string | undefined) {
-  if (!value) {
-    return null;
-  }
-
-  const [payload, signature] = value.split(".");
-
-  if (!payload || !signature) {
-    return null;
-  }
-
-  const valid = await verifySignature(payload, signature);
-
-  if (!valid) {
-    return null;
-  }
-
-  const session = fromBase64Url<AppSession>(payload);
-  if (Date.now() > session.expiresAt) {
-    return null;
-  }
-
-  return session;
+  return verifySignedSessionCookieValue<AppSession>(value, env.SESSION_SECRET);
 }
 
 export async function createUserSession(userId: string) {
   return buildUserSession(userId);
 }
 
+function shouldUseSecureSessionCookie() {
+  return new URL(env.APP_URL).protocol === "https:";
+}
+
 export async function saveSession(session: AppSession) {
   const cookieStore = await cookies();
-  const secureCookie = env.APP_URL.startsWith("https://");
+  const maxAge = Math.floor((session.expiresAt - Date.now()) / 1000);
   cookieStore.set(env.SESSION_COOKIE_NAME, await createSessionCookieValue(session), {
     httpOnly: true,
     sameSite: "lax",
-    secure: secureCookie,
+    secure: shouldUseSecureSessionCookie(),
     path: "/",
+    maxAge,
     expires: new Date(session.expiresAt)
   });
 }
@@ -144,6 +95,18 @@ export async function saveSession(session: AppSession) {
 export async function clearSession() {
   const cookieStore = await cookies();
   cookieStore.delete(env.SESSION_COOKIE_NAME);
+}
+
+export async function createSessionCookie(session: AppSession) {
+  await saveSession(session);
+}
+
+export async function clearSessionCookie() {
+  await clearSession();
+}
+
+export async function verifySessionCookie(value: string | undefined) {
+  return parseSessionCookie(value);
 }
 
 export async function getOptionalSession() {
@@ -163,4 +126,20 @@ export async function getRequiredSession() {
     redirect("/login");
   }
   return session;
+}
+
+export async function getCurrentSession() {
+  return getOptionalSession();
+}
+
+export async function requireSession() {
+  return getRequiredSession();
+}
+
+export async function createUserSessionPayload(userId: string) {
+  return createUserSession(userId);
+}
+
+export async function logout() {
+  await clearSessionCookie();
 }

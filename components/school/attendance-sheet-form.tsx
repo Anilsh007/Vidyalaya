@@ -1,6 +1,5 @@
 "use client";
 
-import { AttendanceStatus } from "@prisma/client";
 import { useActionState, useState } from "react";
 
 import { saveAttendanceSheetAction } from "@/app/(dashboard)/dashboard/attendance/actions";
@@ -8,6 +7,7 @@ import { FormStateMessage } from "@/components/school/form-state-message";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { ATTENDANCE_STATUSES, type ClientAttendanceStatus } from "@/lib/constants/client-enums";
 import { cn } from "@/lib/utils";
 import { initialActionFormState } from "@/lib/forms";
 
@@ -16,32 +16,32 @@ type StudentRow = {
   fullName: string;
   admissionNumber: string;
   rollNumber: string | null;
-  status: AttendanceStatus;
+  status: ClientAttendanceStatus;
   remarks: string;
 };
 
 const statusChoices: Array<{
-  value: AttendanceStatus;
+  value: ClientAttendanceStatus;
   label: string;
   className: string;
 }> = [
   {
-    value: AttendanceStatus.PRESENT,
+    value: ATTENDANCE_STATUSES.PRESENT,
     label: "Present",
     className: "border-emerald-200 bg-emerald-50 text-emerald-800"
   },
   {
-    value: AttendanceStatus.ABSENT,
+    value: ATTENDANCE_STATUSES.ABSENT,
     label: "Absent",
     className: "border-red-200 bg-red-50 text-red-700"
   },
   {
-    value: AttendanceStatus.LATE,
+    value: ATTENDANCE_STATUSES.LATE,
     label: "Late",
     className: "border-amber-200 bg-amber-50 text-amber-800"
   },
   {
-    value: AttendanceStatus.LEAVE,
+    value: ATTENDANCE_STATUSES.LEAVE,
     label: "Leave",
     className: "border-slate-200 bg-slate-100 text-slate-800"
   }
@@ -63,7 +63,7 @@ export function AttendanceSheetForm({
   date: string;
 }) {
   const [state, formAction] = useActionState(saveAttendanceSheetAction, initialActionFormState);
-  const [statuses, setStatuses] = useState<Record<string, AttendanceStatus>>(
+  const [statuses, setStatuses] = useState<Record<string, ClientAttendanceStatus>>(
     Object.fromEntries(students.map((student) => [student.id, student.status]))
   );
 

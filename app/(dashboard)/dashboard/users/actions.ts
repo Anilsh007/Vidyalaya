@@ -9,7 +9,11 @@ import { recordAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
 import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { ROLE_LABELS } from "@/lib/rbac/roles";
+import { hasRole, requireAnyPermission, requireSuperAdmin } from "@/lib/rbac/guards";
 import {
+  canAssignSpecificRole,
   departmentForRoleCategory,
   getSpecificRoleDefinition,
   specificRoleSetsDepartmentHead,
@@ -33,10 +37,6 @@ function normalizePhone(phone: string | null | undefined) {
   return (phone ?? "").replace(/\D+/g, "");
 }
 
-function isSuperAdminSession(session: Awaited<ReturnType<typeof requirePermission>>) {
-  return session.roles.includes("SUPER_ADMIN");
-}
-
 async function resolveAutoLinkedIds(
   tx: Prisma.TransactionClient,
   schoolId: string,
@@ -44,6 +44,7 @@ async function resolveAutoLinkedIds(
   fullName: string,
   email: string,
   phone: string | null,
+  studentId?: string,
   staffId?: string,
   parentId?: string
 ) {
@@ -85,7 +86,7 @@ async function resolveAutoLinkedIds(
     }
   }
 
-  return { staffId, parentId };
+  return { studentId, staffId, parentId };
 }
 
 async function validateReportingManager(
@@ -169,8 +170,21 @@ function buildEmployeeCode(roleCode: RoleCode, sequence: number) {
     SUPER_ADMIN: "ADM",
     ADMIN: "ADM",
     PRINCIPAL: "PRI",
+    DIRECTOR: "DIR",
+    HOD: "HOD",
     TEACHER: "TCH",
+    EXAM_CONTROLLER: "EXM",
     ACCOUNTANT: "ACC",
+    PROCUREMENT_MANAGER: "PRC",
+    LIBRARIAN: "LIB",
+    TRANSPORT_MANAGER: "TRN",
+    HOSTEL_WARDEN: "HST",
+    FRONT_DESK: "FRD",
+    HR: "HRM",
+    NURSE: "NUR",
+    SECURITY_GUARD: "SEC",
+    MAINTENANCE_TECHNICIAN: "MNT",
+    PEON: "PEO",
     STUDENT: "STD",
     PARENT: "PAR"
   };
@@ -183,8 +197,21 @@ function roleCodeToDesignation(roleCode: RoleCode) {
     SUPER_ADMIN: "Administrator",
     ADMIN: "Administrator",
     PRINCIPAL: "Principal",
+    DIRECTOR: "Director",
+    HOD: "HOD",
     TEACHER: "Teacher",
+    EXAM_CONTROLLER: "Exam Controller",
     ACCOUNTANT: "Accountant",
+    PROCUREMENT_MANAGER: "Procurement Manager",
+    LIBRARIAN: "Librarian",
+    TRANSPORT_MANAGER: "Transport Manager",
+    HOSTEL_WARDEN: "Hostel Warden",
+    FRONT_DESK: "Front Desk",
+    HR: "HR",
+    NURSE: "Nurse",
+    SECURITY_GUARD: "Security Guard",
+    MAINTENANCE_TECHNICIAN: "Maintenance Technician",
+    PEON: "Peon",
     STUDENT: "Student",
     PARENT: "Parent"
   };
@@ -203,6 +230,7 @@ async function setLinkedProfile(
   accountFullName: string,
   accountEmail: string,
   accountPhone: string | null,
+  studentId?: string,
   reportingManagerId?: string,
   staffId?: string,
   parentId?: string
@@ -215,6 +243,10 @@ async function setLinkedProfile(
     where: { userId, schoolId },
     select: { id: true }
   });
+  const currentStudent = await tx.student.findFirst({
+    where: { userId, schoolId, isArchived: false },
+    select: { id: true }
+  });
 
   if (currentStaff && currentStaff.id !== staffId) {
     await tx.staff.update({ where: { id: currentStaff.id }, data: { userId: null } });
@@ -222,6 +254,29 @@ async function setLinkedProfile(
 
   if (currentParent && currentParent.id !== parentId) {
     await tx.parent.update({ where: { id: currentParent.id }, data: { userId: null } });
+  }
+  if (currentStudent && currentStudent.id !== studentId) {
+    await tx.student.update({ where: { id: currentStudent.id }, data: { userId: null } });
+  }
+
+  if (linkedProfileType === "student" && studentId) {
+    const student = await tx.student.findFirst({
+      where: { id: studentId, schoolId, isArchived: false },
+      select: { id: true, userId: true, fullName: true, admissionNumber: true }
+    });
+
+    if (!student) {
+      throw new Error("Selected student profile was not found.");
+    }
+
+    if (student.userId && student.userId !== userId) {
+      throw new Error("Selected student profile is already linked to another login.");
+    }
+
+    await tx.student.update({
+      where: { id: student.id },
+      data: { userId }
+    });
   }
 
   if (linkedProfileType === "staff" && staffId) {
@@ -336,7 +391,12 @@ export async function saveUserAction(
   formData: FormData
 ): Promise<ActionFormState> {
   void _prevState;
-  const session = await requirePermission(PERMISSIONS.manageUsers);
+  const isEditing = Boolean(getString(formData, "id"));
+  const session = await requireAnyPermission(
+    isEditing
+      ? [RBAC_PERMISSIONS.usersUpdate, RBAC_PERMISSIONS.usersRolesManage]
+      : [RBAC_PERMISSIONS.usersCreate, RBAC_PERMISSIONS.usersRolesManage]
+  );
   const parsed = userAccountSchema.safeParse({
     id: getString(formData, "id") || undefined,
     fullName: getString(formData, "fullName"),
@@ -369,6 +429,13 @@ export async function saveUserAction(
   const specificRole = getSpecificRoleDefinition(data.specificRoleKey);
   if (!specificRole) {
     return { status: "error", message: "Selected role configuration is invalid." };
+  }
+
+  if (!canAssignSpecificRole(session.roles, data.specificRoleKey)) {
+    return {
+      status: "error",
+      message: `You are not allowed to assign the ${ROLE_LABELS[specificRole.roleCode]} role.`
+    };
   }
 
   const roleCode = specificRole.roleCode as RoleCode;
@@ -425,6 +492,7 @@ export async function saveUserAction(
         data.fullName,
         email,
         data.phone || null,
+        data.studentId,
         data.staffId,
         data.parentId
       );
@@ -489,18 +557,19 @@ export async function saveUserAction(
           });
         }
 
-        await setLinkedProfile(
-          tx,
-          updated.id,
-          session.schoolId,
+      await setLinkedProfile(
+        tx,
+        updated.id,
+        session.schoolId,
           linkedProfileType,
           data.roleCategory,
           specificRoleLabel,
           data.specificRoleKey,
-          updated.fullName,
-          updated.email,
-          updated.phone,
-          reportingManager?.id,
+        updated.fullName,
+        updated.email,
+        updated.phone,
+        resolvedLinks.studentId,
+        reportingManager?.id,
           resolvedLinks.staffId,
           resolvedLinks.parentId
         );
@@ -575,6 +644,7 @@ export async function saveUserAction(
         created.fullName,
         created.email,
         created.phone,
+        resolvedLinks.studentId,
         reportingManager?.id,
         resolvedLinks.staffId,
         resolvedLinks.parentId
@@ -678,13 +748,9 @@ export async function saveUserAction(
 }
 
 export async function deleteUserAction(userId: string): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageUsers);
-
-  if (!isSuperAdminSession(session)) {
-    return {
-      status: "error",
-      message: "Only Super Admin can permanently delete user accounts."
-    };
+  const session = await requirePermission(RBAC_PERMISSIONS.usersDelete);
+  if (!hasRole(session, RoleCode.SUPER_ADMIN)) {
+    await requireSuperAdmin();
   }
 
   if (!userId) {
@@ -707,7 +773,8 @@ export async function deleteUserAction(userId: string): Promise<ActionFormState>
       include: {
         roles: { include: { role: true } },
         staffProfile: true,
-        parentProfile: true
+        parentProfile: true,
+        studentProfile: true
       }
     });
 
@@ -733,6 +800,13 @@ export async function deleteUserAction(userId: string): Promise<ActionFormState>
         });
       }
 
+      if (target.studentProfile?.id) {
+        await tx.student.update({
+          where: { id: target.studentProfile.id },
+          data: { userId: null }
+        });
+      }
+
       await tx.userRole.deleteMany({
         where: { userId: target.id }
       });
@@ -753,7 +827,8 @@ export async function deleteUserAction(userId: string): Promise<ActionFormState>
         email: target.email,
         roleCodes: target.roles.map((entry) => entry.role.code),
         staffProfileId: target.staffProfile?.id ?? null,
-        parentProfileId: target.parentProfile?.id ?? null
+        parentProfileId: target.parentProfile?.id ?? null,
+        studentProfileId: target.studentProfile?.id ?? null
       }
     });
 

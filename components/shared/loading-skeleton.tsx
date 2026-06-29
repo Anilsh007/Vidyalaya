@@ -49,3 +49,29 @@ export function LoadingPage({
     </div>
   );
 }
+
+export function LoadingSkeleton({
+  title,
+  rows = 6
+}: {
+  title?: string;
+  rows?: number;
+}) {
+  return (
+    <div className="grid gap-6">
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="mt-4 h-8 w-full max-w-md" />
+        {title ? <p className="mt-4 text-sm text-slate-500">{title}</p> : null}
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
+        <div className="grid gap-3">
+          {Array.from({ length: rows }).map((_, index) => (
+            <Skeleton key={index} className="h-12 w-full rounded-2xl" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -11,95 +11,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { fromMoney } from "@/lib/fees";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getFeesPageData } from "@/lib/services/fees.service";
 import { formatCurrency } from "@/lib/utils";
 
 export default async function FeesPage() {
   const session = await requirePermission(PERMISSIONS.manageFees);
-  const todayDate = new Date().toISOString().slice(0, 10);
-  const monthStart = new Date(`${new Date().toISOString().slice(0, 7)}-01T00:00:00.000Z`);
-
-  const [feeHeads, classes, students, structures, invoices, dailyPayments, monthlyPayments] =
-    await Promise.all([
-      db.feeHead.findMany({
-        where: { schoolId: session.schoolId },
-        orderBy: { name: "asc" }
-      }),
-      db.schoolClass.findMany({
-        where: { schoolId: session.schoolId },
-        orderBy: [{ displayOrder: "asc" }, { name: "asc" }]
-      }),
-      db.student.findMany({
-        where: {
-          schoolId: session.schoolId,
-          status: { not: "ARCHIVED" }
-        },
-        include: {
-          class: true,
-          section: true
-        },
-        orderBy: [{ fullName: "asc" }]
-      }),
-      db.feeStructure.findMany({
-        where: { schoolId: session.schoolId },
-        include: {
-          class: true,
-          items: {
-            include: { feeHead: true }
-          }
-        },
-        orderBy: [{ effectiveFrom: "desc" }]
-      }),
-      db.feeInvoice.findMany({
-        where: { schoolId: session.schoolId },
-        include: {
-          student: {
-            include: {
-              class: true,
-              section: true
-            }
-          },
-          items: true,
-          payments: {
-            orderBy: { paymentDate: "desc" }
-          }
-        },
-        orderBy: [{ createdAt: "desc" }]
-      }),
-      db.feePayment.findMany({
-        where: {
-          schoolId: session.schoolId,
-          paymentDate: {
-            gte: new Date(`${todayDate}T00:00:00.000Z`),
-            lte: new Date(`${todayDate}T23:59:59.999Z`)
-          }
-        },
-        include: { feeInvoice: true }
-      }),
-      db.feePayment.findMany({
-        where: {
-          schoolId: session.schoolId,
-          paymentDate: {
-            gte: monthStart,
-            lte: new Date()
-          }
-        },
-        include: { feeInvoice: true }
-      })
-    ]);
-
-  const totalOutstanding = invoices.reduce((sum, invoice) => {
-    const balance = fromMoney(invoice.totalAmount) - fromMoney(invoice.paidAmount);
-    return sum + Math.max(0, balance);
-  }, 0);
-
-  const totalInvoiced = invoices.reduce((sum, invoice) => sum + fromMoney(invoice.totalAmount), 0);
-  const totalCollected = invoices.reduce((sum, invoice) => sum + fromMoney(invoice.paidAmount), 0);
-  const todayCollections = dailyPayments.reduce((sum, payment) => sum + fromMoney(payment.amount), 0);
-  const monthCollections = monthlyPayments.reduce((sum, payment) => sum + fromMoney(payment.amount), 0);
-  const pendingInvoices = invoices.filter((invoice) => invoice.status !== FeeInvoiceStatus.PAID);
+  const {
+    feeHeads,
+    classes,
+    students,
+    structures,
+    invoices,
+    dailyPayments,
+    monthlyPayments,
+    totalOutstanding,
+    totalInvoiced,
+    totalCollected,
+    todayCollections,
+    monthCollections,
+    pendingInvoices
+  } = await getFeesPageData(session.schoolId);
 
   return (
     <div className="grid gap-6">

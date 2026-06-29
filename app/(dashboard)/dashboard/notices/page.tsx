@@ -9,31 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { noticeTypeTone } from "@/lib/notices";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getNoticesPageData } from "@/lib/services/notices.service";
 import { toDateInput } from "@/lib/school";
 
 export default async function NoticesPage() {
   const session = await requirePermission(PERMISSIONS.manageNotices);
-  const [classes, sections, notices, roles] = await Promise.all([
-    db.schoolClass.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }]
-    }),
-    db.section.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ name: "asc" }]
-    }),
-    db.notice.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ updatedAt: "desc" }]
-    }),
-    db.role.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: { code: "asc" }
-    })
-  ]);
+  const { classes, sections, notices, roles } = await getNoticesPageData(session.schoolId);
 
   return (
     <div className="grid gap-6">

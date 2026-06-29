@@ -8,39 +8,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getLeavesPageData } from "@/lib/services/leaves.service";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 export default async function LeavesPage() {
   const session = await requirePermission(PERMISSIONS.viewLeaves);
   const canManageLeaves = session.permissions.includes(PERMISSIONS.manageLeaves);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "leaves");
-  const monthStart = new Date();
-  monthStart.setUTCDate(1);
-  monthStart.setUTCHours(0, 0, 0, 0);
-
-  const [students, staff, leaveRequests] = await Promise.all([
-    db.student.findMany({
-      where: { schoolId: session.schoolId, status: { not: "ARCHIVED" } },
-      include: { class: true, section: true },
-      orderBy: [{ fullName: "asc" }]
-    }),
-    db.staff.findMany({
-      where: { schoolId: session.schoolId, isArchived: false },
-      orderBy: [{ fullName: "asc" }]
-    }),
-    db.leaveRequest.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ createdAt: "desc" }],
-      take: 60
-    })
-  ]);
-
-  const pendingLeaves = leaveRequests.filter((leave) => leave.status === "PENDING");
-  const approvedThisMonth = leaveRequests.filter((leave) => leave.status === "APPROVED" && leave.startDate >= monthStart);
-  const studentLeaves = leaveRequests.filter((leave) => leave.requesterType === "STUDENT");
-  const staffLeaves = leaveRequests.filter((leave) => leave.requesterType === "STAFF");
+  const { students, staff, leaveRequests, pendingLeaves, approvedThisMonth, studentLeaves, staffLeaves } =
+    await getLeavesPageData({ schoolId: session.schoolId });
 
   return (
     <div className="grid gap-6">

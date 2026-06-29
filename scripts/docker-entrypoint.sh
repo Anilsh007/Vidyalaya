@@ -7,7 +7,7 @@ if [ "${MIGRATE_ON_START:-true}" = "true" ]; then
 fi
 
 if [ "${SEED_ON_START:-false}" = "true" ]; then
-  echo "Seeding demo data..."
+  echo "Seeding bootstrap system data..."
   npm run prisma:seed
 fi
 

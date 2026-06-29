@@ -1,17 +1,34 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { PrintButton } from "@/components/ui/print-button";
 import { ReportCardTemplate } from "@/components/shared/report-card-template";
-import { requirePermission } from "@/lib/auth/access";
+import { requireAnyPermission } from "@/lib/rbac/guards";
 import { db } from "@/lib/db";
-import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { canAccessStudent } from "@/lib/rbac/scope";
 
 type Params = Promise<{ examId: string; studentId: string }>;
 
+function readStringSetting(settingsMap: Map<string, unknown>, key: string, fallback: string) {
+  const value = settingsMap.get(key);
+  return typeof value === "string" ? value : fallback;
+}
+
 export default async function ReportCardPage({ params }: { params: Params }) {
-  const session = await requirePermission(PERMISSIONS.viewExams);
+  const session = await requireAnyPermission([
+    RBAC_PERMISSIONS.examsRead,
+    RBAC_PERMISSIONS.examsReadOwn,
+    RBAC_PERMISSIONS.examsReadChild,
+    RBAC_PERMISSIONS.examsMarksEntry,
+    RBAC_PERMISSIONS.examsMarksModerate,
+    RBAC_PERMISSIONS.examsPublishResult
+  ]);
   const { examId, studentId } = await params;
+  const allowed = await canAccessStudent(session, studentId);
+  if (!allowed) {
+    redirect("/forbidden");
+  }
 
   const [exam, student, result, settings] = await Promise.all([
     db.exam.findFirst({
@@ -60,14 +77,13 @@ export default async function ReportCardPage({ params }: { params: Params }) {
     orderBy: { subject: { name: "asc" } }
   });
 
-  const settingsMap = new Map(settings.map((item) => [item.key, item.value]));
-  const reportTitle =
-    (typeof settingsMap.get("title") === "string" ? settingsMap.get("title") : null) ??
-    "Progress Report";
-  const principalSignatureLabel =
-    (typeof settingsMap.get("principalSignatureLabel") === "string"
-      ? settingsMap.get("principalSignatureLabel")
-      : null) ?? "Principal";
+  const settingsMap = new Map<string, unknown>(settings.map((item) => [item.key, item.value]));
+  const reportTitle = readStringSetting(settingsMap, "title", "Progress Report");
+  const principalSignatureLabel = readStringSetting(
+    settingsMap,
+    "principalSignatureLabel",
+    "Principal"
+  );
   const schoolAddress = [
     student.school.addressLine1,
     student.school.addressLine2,

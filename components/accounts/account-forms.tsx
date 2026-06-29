@@ -1,6 +1,5 @@
 "use client";
 
-import { FeePaymentMode } from "@prisma/client";
 import { useActionState } from "react";
 
 import { createExpenseVoucherAction, saveExpenseCategoryAction, updateExpenseVoucherStatusAction } from "@/app/(dashboard)/dashboard/accounts/actions";
@@ -11,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
+import { FEE_PAYMENT_MODES } from "@/lib/constants/client-enums";
 import { initialActionFormState } from "@/lib/forms";
 
 type CategoryOption = { id: string; code: string; name: string };
@@ -82,13 +82,13 @@ export function ExpenseVoucherForm({ categories }: { categories: CategoryOption[
           <FieldError error={state.fieldErrors?.amount} />
         </div>
         <FormField label="Payment mode" htmlFor="paymentMode">
-          <Select id="paymentMode" name="paymentMode" defaultValue={FeePaymentMode.CASH}>
-            <option value={FeePaymentMode.CASH}>Cash</option>
-            <option value={FeePaymentMode.UPI}>UPI</option>
-            <option value={FeePaymentMode.BANK_TRANSFER}>Bank transfer</option>
-            <option value={FeePaymentMode.CHEQUE}>Cheque</option>
-            <option value={FeePaymentMode.CARD}>Card</option>
-            <option value={FeePaymentMode.OTHER}>Other</option>
+          <Select id="paymentMode" name="paymentMode" defaultValue={FEE_PAYMENT_MODES.CASH}>
+            <option value={FEE_PAYMENT_MODES.CASH}>Cash</option>
+            <option value={FEE_PAYMENT_MODES.UPI}>UPI</option>
+            <option value={FEE_PAYMENT_MODES.BANK_TRANSFER}>Bank transfer</option>
+            <option value={FEE_PAYMENT_MODES.CHEQUE}>Cheque</option>
+            <option value={FEE_PAYMENT_MODES.CARD}>Card</option>
+            <option value={FEE_PAYMENT_MODES.OTHER}>Other</option>
           </Select>
         </FormField>
         <FormField label="Reference no." htmlFor="referenceNo"><Input id="referenceNo" name="referenceNo" /></FormField>

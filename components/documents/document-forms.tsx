@@ -1,6 +1,5 @@
 "use client";
 
-import { DocumentOwnerType } from "@prisma/client";
 import { useActionState } from "react";
 
 import { archiveDocumentAction, saveDocumentAction } from "@/app/(dashboard)/dashboard/documents/actions";
@@ -10,6 +9,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { DOCUMENT_OWNER_TYPES } from "@/lib/constants/client-enums";
 import { initialActionFormState } from "@/lib/forms";
 
 type Option = { id: string; name: string; meta?: string };
@@ -22,11 +22,11 @@ export function DocumentForm({ students, staff, users }: { students: Option[]; s
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="grid gap-2">
           <FormField label="Owner type" htmlFor="ownerType">
-            <Select id="ownerType" name="ownerType" defaultValue={DocumentOwnerType.STUDENT}>
-              <option value={DocumentOwnerType.SCHOOL}>School</option>
-              <option value={DocumentOwnerType.STUDENT}>Student</option>
-              <option value={DocumentOwnerType.STAFF}>Staff</option>
-              <option value={DocumentOwnerType.USER}>User</option>
+            <Select id="ownerType" name="ownerType" defaultValue={DOCUMENT_OWNER_TYPES.STUDENT}>
+              <option value={DOCUMENT_OWNER_TYPES.SCHOOL}>School</option>
+              <option value={DOCUMENT_OWNER_TYPES.STUDENT}>Student</option>
+              <option value={DOCUMENT_OWNER_TYPES.STAFF}>Staff</option>
+              <option value={DOCUMENT_OWNER_TYPES.USER}>User</option>
             </Select>
           </FormField>
           <FieldError error={state.fieldErrors?.ownerType} />

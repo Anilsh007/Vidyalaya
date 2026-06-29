@@ -25,6 +25,14 @@ function getOptionalString(formData: FormData, key: string) {
   return value || undefined;
 }
 
+function actionError(message: string, fieldErrors?: ActionFormState["fieldErrors"]): ActionFormState {
+  return {
+    status: "error",
+    message,
+    fieldErrors
+  };
+}
+
 export async function saveSchoolSettingsAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
@@ -153,7 +161,7 @@ export async function saveClassAction(
   const session = await requirePermission(PERMISSIONS.manageSchoolSettings);
   const academicYear = await getCurrentAcademicYear(session.schoolId);
   if (!academicYear) {
-    return { status: "error", message: "Set an academic year before creating classes." };
+    return actionError("Set an academic year before creating classes.");
   }
 
   const parsed = classSchema.safeParse({
@@ -178,7 +186,7 @@ export async function saveClassAction(
     });
 
     if (!existing) {
-      return { status: "error", message: "Class not found." };
+      return actionError("Class not found.");
     }
 
     return db.schoolClass.update({
@@ -253,7 +261,7 @@ export async function saveSectionAction(
   const session = await requirePermission(PERMISSIONS.manageSchoolSettings);
   const academicYear = await getCurrentAcademicYear(session.schoolId);
   if (!academicYear) {
-    return { status: "error", message: "Set an academic year before creating sections." };
+    return actionError("Set an academic year before creating sections.");
   }
 
   const parsed = sectionSchema.safeParse({
@@ -280,7 +288,7 @@ export async function saveSectionAction(
     });
 
     if (!existing) {
-      return { status: "error", message: "Section not found." };
+      return actionError("Section not found.");
     }
 
     return db.section.update({
@@ -366,7 +374,7 @@ export async function saveSubjectAction(
   const session = await requirePermission(PERMISSIONS.manageSchoolSettings);
   const academicYear = await getCurrentAcademicYear(session.schoolId);
   if (!academicYear) {
-    return { status: "error", message: "Set an academic year before creating subjects." };
+    return actionError("Set an academic year before creating subjects.");
   }
 
   const parsed = subjectSchema.safeParse({
@@ -392,7 +400,7 @@ export async function saveSubjectAction(
     });
 
     if (!existing) {
-      return { status: "error", message: "Subject not found." };
+      return actionError("Subject not found.");
     }
 
     return db.subject.update({

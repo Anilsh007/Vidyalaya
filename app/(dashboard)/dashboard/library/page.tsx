@@ -1,5 +1,4 @@
 import { BookMarked, BookOpenCheck, Clock3, Search, WalletCards } from "lucide-react";
-import { LibraryIssueStatus } from "@prisma/client";
 
 import { archiveLibraryBookAction } from "@/app/(dashboard)/dashboard/library/actions";
 import { EmptyState } from "@/components/school/empty-state";
@@ -14,8 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getLibraryPageData } from "@/lib/services/library.service";
 import { formatCurrency } from "@/lib/utils";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
@@ -33,69 +32,26 @@ export default async function LibraryPage({ searchParams }: { searchParams: Sear
   const availability = asSingle(params.availability) ?? "";
   const canManageLibrary = session.permissions.includes(PERMISSIONS.manageLibrary);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "library");
+  const {
+    books,
+    allBooks,
+    activeIssues,
+    recentIssues,
+    students,
+    staff,
+    categories,
+    totalCopies,
+    availableCopies,
+    overdueIssues,
+    totalFine
+  } = await getLibraryPageData({
+    schoolId: session.schoolId,
+    query,
+    category,
+    availability
+  });
   const todayEnd = new Date();
   todayEnd.setUTCHours(23, 59, 59, 999);
-
-  const [books, allBooks, activeIssues, recentIssues, students, staff] = await Promise.all([
-    db.libraryBook.findMany({
-      where: {
-        schoolId: session.schoolId,
-        isArchived: false,
-        ...(category ? { category } : {}),
-        ...(availability === "available" ? { availableCopies: { gt: 0 } } : {}),
-        ...(availability === "unavailable" ? { availableCopies: 0 } : {}),
-        ...(query
-          ? {
-              OR: [
-                { title: { contains: query, mode: "insensitive" } },
-                { accessionNumber: { contains: query, mode: "insensitive" } },
-                { author: { contains: query, mode: "insensitive" } },
-                { category: { contains: query, mode: "insensitive" } }
-              ]
-            }
-          : {})
-      },
-      include: {
-        issues: {
-          where: { status: LibraryIssueStatus.ISSUED },
-          take: 1
-        }
-      },
-      orderBy: [{ title: "asc" }]
-    }),
-    db.libraryBook.findMany({
-      where: { schoolId: session.schoolId, isArchived: false },
-      select: { category: true, totalCopies: true, availableCopies: true }
-    }),
-    db.libraryIssue.findMany({
-      where: { schoolId: session.schoolId, status: LibraryIssueStatus.ISSUED },
-      include: { book: true },
-      orderBy: [{ dueDate: "asc" }]
-    }),
-    db.libraryIssue.findMany({
-      where: { schoolId: session.schoolId },
-      include: { book: true },
-      orderBy: [{ createdAt: "desc" }],
-      take: 12
-    }),
-    db.student.findMany({
-      where: { schoolId: session.schoolId, status: { not: "ARCHIVED" } },
-      include: { class: true, section: true },
-      orderBy: [{ fullName: "asc" }]
-    }),
-    db.staff.findMany({
-      where: { schoolId: session.schoolId, isArchived: false },
-      orderBy: [{ fullName: "asc" }]
-    })
-  ]);
-
-  const categories = Array.from(
-    new Set(allBooks.map((item) => item.category).filter((value): value is string => Boolean(value)))
-  ).sort((a, b) => a.localeCompare(b));
-  const totalCopies = allBooks.reduce((sum, book) => sum + book.totalCopies, 0);
-  const availableCopies = allBooks.reduce((sum, book) => sum + book.availableCopies, 0);
-  const overdueIssues = activeIssues.filter((issue) => issue.dueDate < todayEnd);
-  const totalFine = recentIssues.reduce((sum, issue) => sum + Number(issue.fineAmount), 0);
 
   return (
     <div className="grid gap-6">

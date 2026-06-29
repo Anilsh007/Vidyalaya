@@ -10,9 +10,9 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
-import { PERMISSIONS } from "@/lib/permissions";
+import { requireAnyPermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { getStudentsPageData } from "@/lib/services/students.service";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -25,7 +25,7 @@ export default async function StudentsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const session = await requirePermission(PERMISSIONS.viewStudents);
+  const session = await requireAnyPermission([RBAC_PERMISSIONS.studentsRead]);
   const params = await searchParams;
   const query = asSingle(params.q)?.trim() ?? "";
   const classId = asSingle(params.classId) ?? "";
@@ -33,49 +33,15 @@ export default async function StudentsPage({
   const status = asSingle(params.status) ?? "";
   const sort = asSingle(params.sort) ?? "name-asc";
 
-  const [classes, sections, students] = await Promise.all([
-    db.schoolClass.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }]
-    }),
-    db.section.findMany({
-      where: { schoolId: session.schoolId },
-      include: { class: true },
-      orderBy: [{ class: { displayOrder: "asc" } }, { name: "asc" }]
-    }),
-    db.student.findMany({
-      where: {
-        schoolId: session.schoolId,
-        ...(classId ? { classId } : {}),
-        ...(sectionId ? { sectionId } : {}),
-        ...(status ? { status } : {}),
-        ...(query
-          ? {
-              OR: [
-                { fullName: { contains: query, mode: "insensitive" } },
-                { admissionNumber: { contains: query, mode: "insensitive" } },
-                { rollNumber: { contains: query, mode: "insensitive" } }
-              ]
-            }
-          : {})
-      },
-      include: {
-        class: true,
-        section: true,
-        guardians: {
-          where: { isPrimary: true },
-          include: { parent: true },
-          take: 1
-        }
-      },
-      orderBy:
-        sort === "recent"
-          ? { createdAt: "desc" }
-          : sort === "admission-asc"
-            ? { admissionNumber: "asc" }
-            : { fullName: "asc" }
-    })
-  ]);
+  const { classes, sections, students } = await getStudentsPageData({
+    schoolId: session.schoolId,
+    viewer: session,
+    query,
+    classId,
+    sectionId,
+    status,
+    sort
+  });
 
   return (
     <div className="grid gap-6">
@@ -118,7 +84,7 @@ export default async function StudentsPage({
                 <option value="">All sections</option>
                 {sections.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.class.name} - {item.name}
+                    {item.name}
                   </option>
                 ))}
               </Select>
@@ -230,5 +196,5 @@ export default async function StudentsPage({
 }
 
 function hasManageStudents(permissions: string[]) {
-  return permissions.includes(PERMISSIONS.manageStudents);
+  return permissions.includes(RBAC_PERMISSIONS.studentsCreate) || permissions.includes(RBAC_PERMISSIONS.studentsUpdate);
 }

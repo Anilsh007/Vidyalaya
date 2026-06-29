@@ -1,15 +1,14 @@
 "use server";
 
-import { DocumentOwnerType } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
-import { documentSchema } from "@/lib/documents";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { PERMISSIONS } from "@/lib/permissions";
+import { requireAnyPermission, requirePermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { archiveDocumentRecord, saveDocumentRecord } from "@/lib/services/documents.service";
+import { documentSchema } from "@/lib/validations/documents";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -19,7 +18,12 @@ export async function saveDocumentAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageDocuments);
+  const isEditing = Boolean(getString(formData, "id"));
+  const session = await requireAnyPermission(
+    isEditing
+      ? [RBAC_PERMISSIONS.documentsUpdate]
+      : [RBAC_PERMISSIONS.documentsUpload, RBAC_PERMISSIONS.documentsUpdate]
+  );
   const parsed = documentSchema.safeParse({
     id: getString(formData, "id") || undefined,
     ownerType: getString(formData, "ownerType"),
@@ -41,54 +45,16 @@ export async function saveDocumentAction(
     };
   }
 
-  const data = parsed.data;
-
   try {
-    const ownerType = data.ownerType as DocumentOwnerType;
-    const ownerLinks = await resolveOwnerLinks(session.schoolId, ownerType, {
-      studentId: data.studentId,
-      staffId: data.staffId,
-      userId: data.userId
+    const document = await saveDocumentRecord({
+      schoolId: session.schoolId,
+      ...parsed.data
     });
-
-    const documentData = {
-      ownerType,
-      ...ownerLinks,
-      title: data.title,
-      fileName: data.fileName,
-      filePath: data.filePath,
-      mimeType: data.mimeType || null,
-      fileSizeBytes:
-        data.fileSizeBytes === "" || data.fileSizeBytes === undefined ? null : Number(data.fileSizeBytes)
-    };
-
-    const document = data.id
-      ? await (async () => {
-          const existing = await db.document.findFirst({
-            where: { id: data.id, schoolId: session.schoolId },
-            select: { id: true }
-          });
-
-          if (!existing) {
-            throw new Error("Document record not found.");
-          }
-
-          return db.document.update({
-            where: { id: data.id },
-            data: documentData
-          });
-        })()
-      : await db.document.create({
-          data: {
-            schoolId: session.schoolId,
-            ...documentData
-          }
-        });
 
     await recordAuditLog({
       actorUserId: session.userId,
       schoolId: session.schoolId,
-      action: data.id ? "document.updated" : "document.created",
+      action: parsed.data.id ? "document.updated" : "document.uploaded",
       entityType: "Document",
       entityId: document.id,
       metadata: {
@@ -107,26 +73,20 @@ export async function saveDocumentAction(
   }
 }
 
-export async function archiveDocumentAction(formData: FormData) {
-  const session = await requirePermission(PERMISSIONS.manageDocuments);
+export async function archiveDocumentAction(
+  _prevState: ActionFormState = initialActionFormState,
+  formData: FormData
+): Promise<ActionFormState> {
+  const session = await requirePermission(RBAC_PERMISSIONS.documentsArchive);
   const documentId = getString(formData, "documentId");
   if (!documentId) {
-    return;
+    return { status: "error", message: "Document ID is required." };
   }
 
-  const document = await db.document.findFirst({
-    where: { id: documentId, schoolId: session.schoolId },
-    select: { id: true, title: true }
-  });
-
+  const document = await archiveDocumentRecord({ schoolId: session.schoolId, documentId });
   if (!document) {
-    return;
+    return { status: "error", message: "Document record not found." };
   }
-
-  await db.document.update({
-    where: { id: document.id },
-    data: { isArchived: true, archivedAt: new Date() }
-  });
 
   await recordAuditLog({
     actorUserId: session.userId,
@@ -139,51 +99,13 @@ export async function archiveDocumentAction(formData: FormData) {
 
   revalidatePath("/dashboard/documents");
   revalidatePath(`/dashboard/documents/${document.id}`);
+
+  return {
+    status: "success",
+    message: "Document archived."
+  };
 }
 
-async function resolveOwnerLinks(
-  schoolId: string,
-  ownerType: DocumentOwnerType,
-  ownerIds: { studentId?: string; staffId?: string; userId?: string }
-) {
-  if (ownerType === DocumentOwnerType.STUDENT) {
-    const student = await db.student.findFirst({
-      where: { id: ownerIds.studentId, schoolId },
-      select: { id: true }
-    });
-
-    if (!student) {
-      throw new Error("Selected student was not found.");
-    }
-
-    return { studentId: student.id, staffId: null, userId: null };
-  }
-
-  if (ownerType === DocumentOwnerType.STAFF) {
-    const staff = await db.staff.findFirst({
-      where: { id: ownerIds.staffId, schoolId },
-      select: { id: true }
-    });
-
-    if (!staff) {
-      throw new Error("Selected staff member was not found.");
-    }
-
-    return { studentId: null, staffId: staff.id, userId: null };
-  }
-
-  if (ownerType === DocumentOwnerType.USER) {
-    const user = await db.user.findFirst({
-      where: { id: ownerIds.userId, schoolId },
-      select: { id: true }
-    });
-
-    if (!user) {
-      throw new Error("Selected user account was not found.");
-    }
-
-    return { studentId: null, staffId: null, userId: user.id };
-  }
-
-  return { studentId: null, staffId: null, userId: null };
+export async function archiveDocumentSubmitAction(formData: FormData) {
+  await archiveDocumentAction(initialActionFormState, formData);
 }

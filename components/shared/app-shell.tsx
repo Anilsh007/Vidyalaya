@@ -28,15 +28,15 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { logoutAction } from "@/lib/auth/actions";
 import { Button } from "@/components/ui/button";
-import { getVisibleNavItems } from "@/lib/dashboard-experience";
+import { getVisibleModules } from "@/lib/modules/module-access";
 import { cn } from "@/lib/utils";
 
 type AppShellProps = {
   roleSummary: string;
   schoolName: string;
   userLabel: string;
+  roles: string[];
   permissions: string[];
-  roleHints: string[];
   children: ReactNode;
 };
 
@@ -44,8 +44,8 @@ export function AppShell({
   roleSummary,
   schoolName,
   userLabel,
+  roles,
   permissions,
-  roleHints,
   children
 }: AppShellProps) {
   const [profileOpen, setProfileOpen] = useState(false);
@@ -55,10 +55,7 @@ export function AppShell({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  const visibleNavItems = useMemo(
-    () => getVisibleNavItems(permissions, roleHints),
-    [permissions, roleHints]
-  );
+  const visibleModules = useMemo(() => getVisibleModules({ roles, permissions }), [roles, permissions]);
   const forbiddenRedirect = searchParams.get("forbidden") === "1";
 
   useEffect(() => {
@@ -131,12 +128,12 @@ export function AppShell({
           </div>
 
           <nav className="flex-1 overflow-y-auto p-2 gap-1 content-start custom-scrollbar" aria-label="Primary navigation">
-            {visibleNavItems.map((item) => {
-              const Icon = navIconMap[item.href] ?? LayoutDashboard;
+            {visibleModules.map((module) => {
+              const Icon = navIconMap[module.href] ?? LayoutDashboard;
               const active =
-                item.href === "/dashboard"
-                  ? pathname === item.href
-                  : pathname.startsWith(item.href);
+                module.href === "/dashboard"
+                  ? pathname === module.href
+                  : pathname.startsWith(module.href);
 
               const linkStyles = cn(
                 "flex items-center h-10 transition-all duration-200 ease-in-out overflow-hidden whitespace-nowrap text-sm font-medium relative group border border-transparent border-b-slate-800/30 hover:rounded-xl",
@@ -146,30 +143,11 @@ export function AppShell({
                   : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/50"
               );
 
-              return item.disabled ? (
-                <span
-                  key={item.href}
-                  className={cn(
-                    linkStyles,
-                    "cursor-not-allowed opacity-40 text-slate-600 hover:bg-transparent"
-                  )}
-                  aria-disabled="true"
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span
-                    className={cn(
-                      "ml-3 truncate transition-all duration-300 ease-in-out origin-left",
-                      isCollapsed ? "lg:opacity-0 lg:w-0 lg:ml-0" : "opacity-100 w-auto"
-                    )}
-                  >
-                    {item.label}
-                  </span>
-                </span>
-              ) : (
+              return (
                 <Link
-                  key={item.href}
-                  href={item.href}
-                  title={isCollapsed ? item.label : undefined}
+                  key={module.href}
+                  href={module.href}
+                  title={isCollapsed ? module.label : undefined}
                   className={linkStyles}
                 >
                   <Icon
@@ -184,7 +162,7 @@ export function AppShell({
                       isCollapsed ? "lg:opacity-0 lg:w-0 lg:ml-0" : "opacity-100 w-auto"
                     )}
                   >
-                    {item.label}
+                    {module.label}
                   </span>
                 </Link>
               );

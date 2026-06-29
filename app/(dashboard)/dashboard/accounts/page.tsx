@@ -9,9 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { fromMoney } from "@/lib/fees";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getAccountsPageData } from "@/lib/services/accounts.service";
 import { formatCurrency } from "@/lib/utils";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
@@ -19,22 +19,8 @@ export default async function AccountsPage() {
   const session = await requirePermission(PERMISSIONS.viewAccounts);
   const canManageAccounts = session.permissions.includes(PERMISSIONS.manageAccounts);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "accounts");
-  const monthStart = new Date();
-  monthStart.setUTCDate(1);
-  monthStart.setUTCHours(0, 0, 0, 0);
-
-  const [categories, vouchers, monthlyExpenseAggregate, paidExpenseAggregate] = await Promise.all([
-    db.expenseCategory.findMany({ where: { schoolId: session.schoolId }, orderBy: [{ code: "asc" }] }),
-    db.expenseVoucher.findMany({ where: { schoolId: session.schoolId }, include: { category: true }, orderBy: [{ expenseDate: "desc" }, { createdAt: "desc" }], take: 60 }),
-    db.expenseVoucher.aggregate({ where: { schoolId: session.schoolId, expenseDate: { gte: monthStart }, status: { not: "CANCELLED" } }, _sum: { amount: true } }),
-    db.expenseVoucher.aggregate({ where: { schoolId: session.schoolId, status: "PAID" }, _sum: { amount: true } })
-  ]);
-
-  const activeCategories = categories.filter((category) => category.isActive);
-  const draftVouchers = vouchers.filter((voucher) => voucher.status === "DRAFT");
-  const approvedVouchers = vouchers.filter((voucher) => voucher.status === "APPROVED");
-  const monthlyExpense = fromMoney(monthlyExpenseAggregate._sum.amount);
-  const paidExpense = fromMoney(paidExpenseAggregate._sum.amount);
+  const { categories, vouchers, activeCategories, draftVouchers, approvedVouchers, monthlyExpense, paidExpense } =
+    await getAccountsPageData({ schoolId: session.schoolId });
 
   return (
     <div className="grid gap-6">
@@ -93,7 +79,7 @@ type Voucher = {
   expenseDate: Date;
   paidTo: string;
   vendorName: string | null;
-  description: string;
+  description: string | null;
   amount: Prisma.Decimal;
   paymentMode: FeePaymentMode;
   referenceNo: string | null;

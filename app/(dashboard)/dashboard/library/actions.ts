@@ -1,14 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { LibraryIssueStatus, Prisma } from "@prisma/client";
 
 import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { libraryBookSchema, libraryIssueSchema, libraryReturnSchema } from "@/lib/library";
 import { PERMISSIONS } from "@/lib/permissions";
+import {
+  archiveLibraryBook,
+  issueLibraryBook,
+  returnLibraryBook,
+  saveLibraryBook
+} from "@/lib/services/library.service";
+import { libraryBookSchema, libraryIssueSchema, libraryReturnSchema } from "@/lib/validations/library";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -55,48 +59,19 @@ export async function saveLibraryBookAction(
   }
 
   try {
-    const book = data.id
-      ? await (async () => {
-          const existing = await db.libraryBook.findFirst({
-            where: { id: data.id, schoolId: session.schoolId },
-            select: { id: true }
-          });
-
-          if (!existing) {
-            throw new Error("Book not found.");
-          }
-
-          return db.libraryBook.update({
-            where: { id: existing.id },
-            data: {
-              accessionNumber: data.accessionNumber,
-              title: data.title,
-              author: data.author || null,
-              category: data.category || null,
-              publisher: data.publisher || null,
-              isbn: data.isbn || null,
-              shelfLocation: data.shelfLocation || null,
-              totalCopies: data.totalCopies,
-              availableCopies: data.availableCopies,
-              isArchived: false,
-              archivedAt: null
-            }
-          });
-        })()
-      : await db.libraryBook.create({
-          data: {
-            schoolId: session.schoolId,
-            accessionNumber: data.accessionNumber,
-            title: data.title,
-            author: data.author || null,
-            category: data.category || null,
-            publisher: data.publisher || null,
-            isbn: data.isbn || null,
-            shelfLocation: data.shelfLocation || null,
-            totalCopies: data.totalCopies,
-            availableCopies: data.availableCopies
-          }
-        });
+    const book = await saveLibraryBook({
+      schoolId: session.schoolId,
+      id: data.id,
+      accessionNumber: data.accessionNumber,
+      title: data.title,
+      author: data.author,
+      category: data.category,
+      publisher: data.publisher,
+      isbn: data.isbn,
+      shelfLocation: data.shelfLocation,
+      totalCopies: data.totalCopies,
+      availableCopies: data.availableCopies
+    });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -121,26 +96,7 @@ export async function archiveLibraryBookAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.manageLibrary);
   const bookId = getString(formData, "bookId");
   if (!bookId) return;
-
-  const activeIssues = await db.libraryIssue.count({
-    where: { schoolId: session.schoolId, bookId, status: LibraryIssueStatus.ISSUED }
-  });
-
-  if (activeIssues > 0) {
-    return;
-  }
-
-  const book = await db.libraryBook.findFirst({
-    where: { id: bookId, schoolId: session.schoolId },
-    select: { id: true }
-  });
-
-  if (!book) return;
-
-  await db.libraryBook.update({
-    where: { id: book.id },
-    data: { isArchived: true, archivedAt: new Date() }
-  });
+  const book = await archiveLibraryBook({ schoolId: session.schoolId, bookId });
 
   await recordAuditLog({
     actorUserId: session.userId,
@@ -180,56 +136,16 @@ export async function issueLibraryBookAction(
   const data = parsed.data;
 
   try {
-    const issue = await db.$transaction(async (tx) => {
-      const book = await tx.libraryBook.findFirst({
-        where: { id: data.bookId, schoolId: session.schoolId, isArchived: false }
-      });
-
-      if (!book) {
-        throw new Error("Book not found.");
-      }
-
-      if (book.availableCopies < 1) {
-        throw new Error("No available copy is left for this book.");
-      }
-
-      let borrowerName = data.borrowerName?.trim() ?? "";
-      if (data.borrowerType === "STUDENT") {
-        const student = await tx.student.findFirst({
-          where: { id: data.studentId, schoolId: session.schoolId },
-          select: { fullName: true }
-        });
-        if (!student) throw new Error("Student borrower not found.");
-        borrowerName = student.fullName;
-      }
-
-      if (data.borrowerType === "STAFF") {
-        const staff = await tx.staff.findFirst({
-          where: { id: data.staffId, schoolId: session.schoolId },
-          select: { fullName: true }
-        });
-        if (!staff) throw new Error("Staff borrower not found.");
-        borrowerName = staff.fullName;
-      }
-
-      await tx.libraryBook.update({
-        where: { id: book.id },
-        data: { availableCopies: { decrement: 1 } }
-      });
-
-      return tx.libraryIssue.create({
-        data: {
-          schoolId: session.schoolId,
-          bookId: book.id,
-          studentId: data.borrowerType === "STUDENT" ? data.studentId : null,
-          staffId: data.borrowerType === "STAFF" ? data.staffId : null,
-          borrowerName,
-          borrowerType: data.borrowerType,
-          issueDate: new Date(`${data.issueDate}T00:00:00.000Z`),
-          dueDate: new Date(`${data.dueDate}T23:59:59.999Z`),
-          remarks: data.remarks || null
-        }
-      });
+    const issue = await issueLibraryBook({
+      schoolId: session.schoolId,
+      bookId: data.bookId,
+      borrowerType: data.borrowerType,
+      studentId: data.studentId,
+      staffId: data.staffId,
+      borrowerName: data.borrowerName,
+      issueDate: data.issueDate,
+      dueDate: data.dueDate,
+      remarks: data.remarks
     });
 
     await recordAuditLog({
@@ -273,33 +189,11 @@ export async function returnLibraryBookAction(
   const data = parsed.data;
 
   try {
-    const issue = await db.$transaction(async (tx) => {
-      const existing = await tx.libraryIssue.findFirst({
-        where: { id: data.issueId, schoolId: session.schoolId, status: LibraryIssueStatus.ISSUED },
-        include: { book: true }
-      });
-
-      if (!existing) {
-        throw new Error("Active issue record not found.");
-      }
-
-      await tx.libraryBook.update({
-        where: { id: existing.bookId },
-        data: { availableCopies: { increment: 1 } }
-      });
-
-      return tx.libraryIssue.update({
-        where: { id: existing.id },
-        data: {
-          status: LibraryIssueStatus.RETURNED,
-          returnedAt: new Date(),
-          fineAmount:
-            data.fineAmount === undefined || data.fineAmount === ""
-              ? new Prisma.Decimal(0)
-              : new Prisma.Decimal(data.fineAmount),
-          remarks: data.remarks || existing.remarks
-        }
-      });
+    const issue = await returnLibraryBook({
+      schoolId: session.schoolId,
+      issueId: data.issueId,
+      fineAmount: data.fineAmount,
+      remarks: data.remarks
     });
 
     await recordAuditLog({

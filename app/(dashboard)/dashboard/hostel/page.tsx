@@ -10,8 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getHostelPageData } from "@/lib/services/hostel.service";
 import { formatCurrency } from "@/lib/utils";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
@@ -19,38 +19,16 @@ export default async function HostelPage() {
   const session = await requirePermission(PERMISSIONS.viewHostel);
   const canManageHostel = session.permissions.includes(PERMISSIONS.manageHostel);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "hostel");
-
-  const [hostels, rooms, allocations, students] = await Promise.all([
-    db.hostel.findMany({
-      where: { schoolId: session.schoolId, isArchived: false },
-      include: { rooms: true, allocations: { where: { status: "ACTIVE" } } },
-      orderBy: [{ code: "asc" }]
-    }),
-    db.hostelRoom.findMany({
-      where: { schoolId: session.schoolId, isArchived: false },
-      include: { hostel: true, allocations: { where: { status: "ACTIVE" } } },
-      orderBy: [{ hostel: { code: "asc" } }, { roomNumber: "asc" }]
-    }),
-    db.hostelAllocation.findMany({
-      where: { schoolId: session.schoolId },
-      include: { student: { include: { class: true, section: true } }, hostel: true, room: true },
-      orderBy: [{ createdAt: "desc" }],
-      take: 20
-    }),
-    db.student.findMany({
-      where: { schoolId: session.schoolId, status: { not: "ARCHIVED" } },
-      include: { class: true, section: true },
-      orderBy: [{ fullName: "asc" }]
-    })
-  ]);
-
-  const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0);
-  const activeAllocations = allocations.filter((allocation) => allocation.status === "ACTIVE");
-  const monthlyHostelValue = activeAllocations.reduce(
-    (sum, allocation) => sum + Number(allocation.monthlyFee ?? allocation.room.monthlyFee ?? 0),
-    0
-  );
-  const consentPending = activeAllocations.filter((allocation) => !allocation.guardianConsent).length;
+  const {
+    hostels,
+    rooms,
+    allocations,
+    students,
+    totalCapacity,
+    activeAllocations,
+    monthlyHostelValue,
+    consentPending
+  } = await getHostelPageData({ schoolId: session.schoolId });
 
   return (
     <div className="grid gap-6">

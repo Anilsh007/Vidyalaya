@@ -11,8 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getStaffPageData } from "@/lib/services/staff.service";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -29,50 +29,14 @@ export default async function StaffPage({ searchParams }: { searchParams: Search
   const status = asSingle(params.status) ?? "active";
   const sort = asSingle(params.sort) ?? "name-asc";
 
-  const [departments, staff] = await Promise.all([
-    db.staff.findMany({
-      where: {
-        schoolId: session.schoolId,
-        department: { not: null }
-      },
-      distinct: ["department"],
-      select: { department: true },
-      orderBy: { department: "asc" }
-    }),
-    db.staff.findMany({
-      where: {
-        schoolId: session.schoolId,
-        ...(status === "archived" ? { isArchived: true } : status === "all" ? {} : { isArchived: false }),
-        ...(department ? { department } : {}),
-        ...(staffType === "teaching" ? { isTeachingStaff: true } : {}),
-        ...(staffType === "non-teaching" ? { isTeachingStaff: false } : {}),
-        ...(query
-          ? {
-              OR: [
-                { fullName: { contains: query, mode: "insensitive" } },
-                { employeeCode: { contains: query, mode: "insensitive" } },
-                { designation: { contains: query, mode: "insensitive" } },
-                { phone: { contains: query, mode: "insensitive" } },
-                { email: { contains: query, mode: "insensitive" } }
-              ]
-            }
-          : {})
-      },
-      include: {
-        user: {
-          include: {
-            roles: { include: { role: true } }
-          }
-        }
-      },
-      orderBy:
-        sort === "recent"
-          ? { createdAt: "desc" }
-          : sort === "employee-asc"
-            ? { employeeCode: "asc" }
-            : { fullName: "asc" }
-    })
-  ]);
+  const { departments, staff } = await getStaffPageData({
+    schoolId: session.schoolId,
+    query,
+    department,
+    staffType,
+    status,
+    sort
+  });
 
   const canManageStaff = session.permissions.includes(PERMISSIONS.manageStaff);
 

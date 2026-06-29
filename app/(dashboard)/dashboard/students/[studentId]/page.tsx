@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Archive, PencilLine, Phone } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -9,16 +9,25 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/access";
+import { requireAnyPermission } from "@/lib/rbac/guards";
 import { db } from "@/lib/db";
-import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { canAccessStudent } from "@/lib/rbac/scope";
 import { toDateInput } from "@/lib/school";
 
 type Params = Promise<{ studentId: string }>;
 
 export default async function StudentProfilePage({ params }: { params: Params }) {
-  const session = await requirePermission(PERMISSIONS.viewStudents);
+  const session = await requireAnyPermission([
+    RBAC_PERMISSIONS.studentsRead,
+    RBAC_PERMISSIONS.studentsReadOwn,
+    RBAC_PERMISSIONS.studentsReadChild
+  ]);
   const { studentId } = await params;
+  const allowed = await canAccessStudent(session, studentId);
+  if (!allowed) {
+    redirect(`/forbidden?next=${encodeURIComponent("/dashboard/students")}`);
+  }
   const student = await db.student.findFirst({
     where: { id: studentId, schoolId: session.schoolId },
     include: {
@@ -36,8 +45,15 @@ export default async function StudentProfilePage({ params }: { params: Params })
   }
 
   const primaryGuardian = student.guardians[0]?.parent;
-  const canViewAttendance = session.permissions.includes(PERMISSIONS.viewAttendance);
-  const canViewExams = session.permissions.includes(PERMISSIONS.viewExams);
+  const canViewAttendance =
+    session.permissions.includes(RBAC_PERMISSIONS.attendanceRead) ||
+    session.permissions.includes(RBAC_PERMISSIONS.attendanceReadClass) ||
+    session.permissions.includes(RBAC_PERMISSIONS.attendanceReadOwn) ||
+    session.permissions.includes(RBAC_PERMISSIONS.attendanceReadChild);
+  const canViewExams =
+    session.permissions.includes(RBAC_PERMISSIONS.examsRead) ||
+    session.permissions.includes(RBAC_PERMISSIONS.examsReadOwn) ||
+    session.permissions.includes(RBAC_PERMISSIONS.examsReadChild);
   const attendanceHistoryPromise = canViewAttendance
     ? db.attendance.findMany({
         where: {
@@ -88,7 +104,7 @@ export default async function StudentProfilePage({ params }: { params: Params })
         description="Review identity, admission data, class placement, and guardian details before making changes."
         actions={
           <div className="flex flex-wrap gap-3">
-            {session.permissions.includes(PERMISSIONS.manageStudents) ? (
+            {session.permissions.includes(RBAC_PERMISSIONS.studentsUpdate) ? (
               <>
                 <Link href={`/dashboard/students/${student.id}/edit`}>
                   <Button variant="secondary">

@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { documentOwnerLabel, documentOwnerTypeLabel, formatFileSize } from "@/lib/documents";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getDocumentsPageData } from "@/lib/services/documents.service";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -30,31 +30,12 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Se
   const status = asSingle(params.status) ?? "active";
   const sort = asSingle(params.sort) ?? "recent";
 
-  const documents = await db.document.findMany({
-    where: {
-      schoolId: session.schoolId,
-      ...(status === "archived" ? { isArchived: true } : status === "all" ? {} : { isArchived: false }),
-      ...(ownerType ? { ownerType: ownerType as DocumentOwnerType } : {}),
-      ...(query
-        ? {
-            OR: [
-              { title: { contains: query, mode: "insensitive" } },
-              { fileName: { contains: query, mode: "insensitive" } },
-              { filePath: { contains: query, mode: "insensitive" } },
-              { student: { is: { fullName: { contains: query, mode: "insensitive" } } } },
-              { staff: { is: { fullName: { contains: query, mode: "insensitive" } } } },
-              { user: { is: { fullName: { contains: query, mode: "insensitive" } } } }
-            ]
-          }
-        : {})
-    },
-    include: { student: true, staff: true, user: true },
-    orderBy:
-      sort === "title-asc"
-        ? { title: "asc" }
-        : sort === "owner-asc"
-          ? { ownerType: "asc" }
-          : { uploadedAt: "desc" }
+  const { documents } = await getDocumentsPageData({
+    schoolId: session.schoolId,
+    query,
+    ownerType,
+    status,
+    sort
   });
 
   const canManageDocuments = session.permissions.includes(PERMISSIONS.manageDocuments);

@@ -1,22 +1,21 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { RoleCode } from "@prisma/client";
 
-import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
-import {
-  computeResultSummary,
-  examSchema,
-  getGradeBands,
-  gradeConfigSchema,
-  marksSheetSchema,
-  parseGradeBandsText,
-  toMoney
-} from "@/lib/exams";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { PERMISSIONS } from "@/lib/permissions";
-import { getCurrentAcademicYear, upsertSetting } from "@/lib/school";
+import { hasAnyRole, requireAnyPermission, requirePermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { teacherCanAccessAssignedClass } from "@/lib/rbac/scope";
+import {
+  getExamsPageData,
+  saveExamRecord,
+  saveGradeConfig,
+  saveMarksSheet
+} from "@/lib/services/exams.service";
+import { getCurrentAcademicYear } from "@/lib/school";
+import { examSchema, gradeConfigSchema, marksSheetSchema } from "@/lib/validations/exams";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -31,7 +30,12 @@ export async function saveExamAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageExams);
+  const isEditing = Boolean(getOptionalString(formData, "id"));
+  const session = await requireAnyPermission(
+    isEditing
+      ? [RBAC_PERMISSIONS.examsUpdate]
+      : [RBAC_PERMISSIONS.examsCreate, RBAC_PERMISSIONS.examsUpdate]
+  );
   const academicYear = await getCurrentAcademicYear(session.schoolId);
 
   if (!academicYear) {
@@ -56,12 +60,24 @@ export async function saveExamAction(
     };
   }
 
-  const data = parsed.data;
-  if (new Date(data.startDate) > new Date(data.endDate)) {
+  if (new Date(parsed.data.startDate) > new Date(parsed.data.endDate)) {
     return {
       status: "error",
       message: "Exam end date must be after the start date."
     };
+  }
+
+  if (
+    parsed.data.classId &&
+    hasAnyRole(session, [RoleCode.TEACHER, RoleCode.HOD, RoleCode.EXAM_CONTROLLER])
+  ) {
+    const canAccess = await teacherCanAccessAssignedClass(session, parsed.data.classId);
+    if (!canAccess) {
+      return {
+        status: "error",
+        message: "You can only manage exams for your assigned class."
+      };
+    }
   }
 
   const subjectCodes = formData
@@ -90,76 +106,48 @@ export async function saveExamAction(
     };
   }
 
-  const exam = await db.$transaction(async (tx) => {
-    const saved = data.id
-      ? await tx.exam.update({
-          where: { id: data.id },
-          data: {
-            name: data.name,
-            classId: data.classId || null,
-            examTerm: data.examTerm,
-            examType: data.examType,
-            startDate: new Date(`${data.startDate}T00:00:00.000Z`),
-            endDate: new Date(`${data.endDate}T23:59:59.999Z`)
-          }
-        })
-      : await tx.exam.create({
-          data: {
-            schoolId: session.schoolId,
-            academicYearId: academicYear.id,
-            classId: data.classId || null,
-            name: data.name,
-            examTerm: data.examTerm,
-            examType: data.examType,
-            startDate: new Date(`${data.startDate}T00:00:00.000Z`),
-            endDate: new Date(`${data.endDate}T23:59:59.999Z`)
-          }
-        });
-
-    await tx.examSubject.deleteMany({
-      where: { examId: saved.id }
+  try {
+    const exam = await saveExamRecord({
+      schoolId: session.schoolId,
+      academicYearId: academicYear.id,
+      ...parsed.data,
+      subjects: subjectsInput
     });
 
-    await tx.examSubject.createMany({
-      data: subjectsInput.map((item) => ({
-        examId: saved.id,
-        subjectId: item.subjectId,
-        maxMarks: toMoney(item.maxMarks),
-        passMarks: toMoney(item.passMarks)
-      }))
+    await recordAuditLog({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: parsed.data.id ? "exam.updated" : "exam.created",
+      entityType: "Exam",
+      entityId: exam.id,
+      metadata: {
+        classId: parsed.data.classId || null,
+        examTerm: parsed.data.examTerm,
+        examType: parsed.data.examType,
+        subjectCount: subjectsInput.length
+      }
     });
 
-    return saved;
-  });
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/exams");
 
-  await recordAuditLog({
-    actorUserId: session.userId,
-    schoolId: session.schoolId,
-    action: data.id ? "exam.updated" : "exam.created",
-    entityType: "Exam",
-    entityId: exam.id,
-    metadata: {
-      classId: data.classId || null,
-      examTerm: data.examTerm,
-      examType: data.examType,
-      subjectCount: subjectsInput.length
-    }
-  });
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/exams");
-
-  return {
-    status: "success",
-    message: data.id ? "Exam updated." : "Exam created."
-  };
+    return {
+      status: "success",
+      message: parsed.data.id ? "Exam updated." : "Exam created."
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to save exam."
+    };
+  }
 }
 
 export async function saveGradeConfigAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageExams);
+  const session = await requirePermission(RBAC_PERMISSIONS.examsMarksModerate);
   const parsed = gradeConfigSchema.safeParse({
     gradeConfig: getString(formData, "gradeConfig")
   });
@@ -172,39 +160,42 @@ export async function saveGradeConfigAction(
     };
   }
 
-  const bands = parseGradeBandsText(parsed.data.gradeConfig);
-  if (!bands.length) {
+  try {
+    const result = await saveGradeConfig({
+      schoolId: session.schoolId,
+      gradeConfig: parsed.data.gradeConfig
+    });
+
+    await recordAuditLog({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: "exam.updated",
+      entityType: "Setting",
+      metadata: { subtype: "grading.updated", bands: result.bands }
+    });
+
+    revalidatePath("/dashboard/exams");
+
+    return {
+      status: "success",
+      message: "Grading configuration updated."
+    };
+  } catch (error) {
     return {
       status: "error",
-      message: "Add grading rules using the format min:grade:PASS or FAIL."
+      message: error instanceof Error ? error.message : "Unable to save grading."
     };
   }
-
-  await db.$transaction(async (tx) => {
-    await upsertSetting(tx, session.schoolId, "grading", "bands", bands);
-  });
-
-  await recordAuditLog({
-    actorUserId: session.userId,
-    schoolId: session.schoolId,
-    action: "grading.updated",
-    entityType: "Setting",
-    metadata: { bands }
-  });
-
-  revalidatePath("/dashboard/exams");
-
-  return {
-    status: "success",
-    message: "Grading configuration updated."
-  };
 }
 
 export async function saveMarksSheetAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageExams);
+  const session = await requireAnyPermission([
+    RBAC_PERMISSIONS.examsMarksEntry,
+    RBAC_PERMISSIONS.examsMarksModerate
+  ]);
   const parsed = marksSheetSchema.safeParse({
     examId: getString(formData, "examId"),
     sectionId: getString(formData, "sectionId"),
@@ -219,159 +210,68 @@ export async function saveMarksSheetAction(
     };
   }
 
-  const exam = await db.exam.findFirst({
-    where: { id: parsed.data.examId, schoolId: session.schoolId },
-    include: {
-      examSubjects: {
-        include: { subject: true }
-      }
+  const pageData = await getExamsPageData(session.schoolId);
+  const selectedExam = pageData.exams.find((item) => item.id === parsed.data.examId);
+  if (
+    selectedExam?.classId &&
+    hasAnyRole(session, [RoleCode.TEACHER, RoleCode.HOD, RoleCode.EXAM_CONTROLLER])
+  ) {
+    const canAccess = await teacherCanAccessAssignedClass(session, selectedExam.classId);
+    if (!canAccess) {
+      return {
+        status: "error",
+        message: "You can only enter marks for your assigned class."
+      };
     }
-  });
-
-  if (!exam) {
-    return { status: "error", message: "Exam not found." };
   }
 
-  const examSubject = exam.examSubjects.find((item) => item.id === parsed.data.examSubjectId);
-  if (!examSubject) {
-    return { status: "error", message: "Exam subject not found." };
-  }
+  const entries = Array.from(new Set(
+    Array.from(formData.keys())
+      .filter((key) => key.startsWith("marks_"))
+      .map((key) => key.replace("marks_", ""))
+  )).map((studentId) => ({
+    studentId,
+    marksObtained: Number(getString(formData, `marks_${studentId}`) || 0),
+    remarks: getString(formData, `remarks_${studentId}`).trim() || null
+  }));
 
-  const section = await db.section.findFirst({
-    where: {
-      id: parsed.data.sectionId,
-      schoolId: session.schoolId
-    },
-    include: { class: true }
-  });
-
-  if (!section) {
-    return { status: "error", message: "Section not found." };
-  }
-
-  const students = await db.student.findMany({
-    where: {
+  try {
+    const result = await saveMarksSheet({
       schoolId: session.schoolId,
-      sectionId: section.id,
-      classId: section.classId,
-      status: { not: "ARCHIVED" }
-    },
-    orderBy: [{ rollNumber: "asc" }, { fullName: "asc" }]
-  });
+      examId: parsed.data.examId,
+      sectionId: parsed.data.sectionId,
+      examSubjectId: parsed.data.examSubjectId,
+      teacherRemarks: getString(formData, "teacherRemarks").trim() || null,
+      principalRemarks: getString(formData, "principalRemarks").trim() || null,
+      entries
+    });
 
-  const gradeBands = await getGradeBands(session.schoolId);
-  const teacherRemarks = getString(formData, "teacherRemarks").trim() || null;
-  const principalRemarks = getString(formData, "principalRemarks").trim() || null;
+    await recordAuditLog({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: "exam.marks_saved",
+      entityType: "Exam",
+      entityId: result.exam.id,
+      metadata: {
+        sectionId: result.section.id,
+        examSubjectId: result.examSubject.id,
+        subjectId: result.examSubject.subjectId,
+        studentCount: result.studentsCount
+      }
+    });
 
-  await db.$transaction(async (tx) => {
-    for (const student of students) {
-      const marksValue = Number(getString(formData, `marks_${student.id}`) || 0);
-      const subjectRemarks = getString(formData, `remarks_${student.id}`).trim() || null;
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/exams");
+    revalidatePath("/dashboard/students");
 
-      const safeMarks = Math.max(0, Math.min(marksValue, Number(examSubject.maxMarks)));
-
-      await tx.examMark.upsert({
-        where: {
-          examSubjectId_studentId: {
-            examSubjectId: examSubject.id,
-            studentId: student.id
-          }
-        },
-        update: {
-          examId: exam.id,
-          subjectId: examSubject.subjectId,
-          marksObtained: toMoney(safeMarks),
-          remarks: subjectRemarks
-        },
-        create: {
-          examId: exam.id,
-          examSubjectId: examSubject.id,
-          subjectId: examSubject.subjectId,
-          studentId: student.id,
-          marksObtained: toMoney(safeMarks),
-          remarks: subjectRemarks
-        }
-      });
-
-      const allMarks = await tx.examMark.findMany({
-        where: {
-          examId: exam.id,
-          studentId: student.id
-        },
-        include: {
-          examSubject: true
-        }
-      });
-
-      const totalMarks = allMarks.reduce(
-        (sum, item) => sum + Number(item.examSubject.maxMarks),
-        0
-      );
-      const obtainedMarks = allMarks.reduce(
-        (sum, item) => sum + Number(item.marksObtained),
-        0
-      );
-      const hasSubjectFailure = allMarks.some(
-        (item) => Number(item.marksObtained) < Number(item.examSubject.passMarks)
-      );
-      const summary = computeResultSummary({
-        obtainedMarks,
-        totalMarks,
-        hasSubjectFailure,
-        bands: gradeBands
-      });
-
-      await tx.examResult.upsert({
-        where: {
-          examId_studentId: {
-            examId: exam.id,
-            studentId: student.id
-          }
-        },
-        update: {
-          totalMarks: toMoney(totalMarks),
-          obtainedMarks: toMoney(obtainedMarks),
-          percentage: toMoney(summary.percentage),
-          grade: summary.grade,
-          resultStatus: summary.resultStatus,
-          teacherRemarks,
-          principalRemarks
-        },
-        create: {
-          examId: exam.id,
-          studentId: student.id,
-          totalMarks: toMoney(totalMarks),
-          obtainedMarks: toMoney(obtainedMarks),
-          percentage: toMoney(summary.percentage),
-          grade: summary.grade,
-          resultStatus: summary.resultStatus,
-          teacherRemarks,
-          principalRemarks
-        }
-      });
-    }
-  });
-
-  await recordAuditLog({
-    actorUserId: session.userId,
-    schoolId: session.schoolId,
-    action: "exam_marks.saved",
-    entityType: "Exam",
-    entityId: exam.id,
-    metadata: {
-      sectionId: section.id,
-      examSubjectId: examSubject.id,
-      subjectId: examSubject.subjectId,
-      studentCount: students.length
-    }
-  });
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/exams");
-  revalidatePath("/dashboard/students");
-
-  return {
-    status: "success",
-    message: `Marks saved for ${students.length} student${students.length === 1 ? "" : "s"}.`
-  };
+    return {
+      status: "success",
+      message: `Marks saved for ${result.studentsCount} student${result.studentsCount === 1 ? "" : "s"}.`
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to save marks."
+    };
+  }
 }

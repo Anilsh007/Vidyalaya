@@ -1,5 +1,4 @@
-import { NAV_ITEMS, type NavItem } from "@/lib/copy";
-import { type AppSession } from "@/lib/auth/session";
+import { RoleCode } from "@prisma/client";
 
 export type ExperienceRoleKey =
   | "admin"
@@ -23,80 +22,18 @@ type WorkspaceKey =
   | "transport"
   | "hostel";
 
-const ROLE_ALIASES: Record<ExperienceRoleKey, string[]> = {
-  admin: ["ADMIN", "SUPER_ADMIN"],
-  leadership: ["PRINCIPAL", "DIRECTOR", "ACADEMIC_HEAD"],
-  teaching: ["TEACHER", "HOD", "INSTRUCTOR"],
-  finance: ["ACCOUNTANT", "CASHIER", "FINANCE_HEAD"],
-  guardian: ["STUDENT", "PARENT"],
-  library: ["LIBRARIAN", "MEDIA_CENTER_MANAGER"],
-  transport: ["TRANSPORT_MANAGER", "DRIVER_COORDINATOR"],
-  hostel: ["HOSTEL_WARDEN", "RESIDENTIAL_IN_CHARGE"],
-  inventory: ["INVENTORY", "STORES", "PROCUREMENT_MANAGER", "INVENTORY_MANAGER"],
-  frontdesk: ["FRONT_DESK", "RECEPTIONIST", "ADMISSION_COUNSELOR"],
+const ROLE_GROUPS: Record<ExperienceRoleKey, RoleCode[]> = {
+  admin: [RoleCode.ADMIN, RoleCode.SUPER_ADMIN],
+  leadership: [RoleCode.PRINCIPAL, RoleCode.DIRECTOR, RoleCode.HR],
+  teaching: [RoleCode.TEACHER, RoleCode.HOD, RoleCode.EXAM_CONTROLLER],
+  finance: [RoleCode.ACCOUNTANT, RoleCode.PROCUREMENT_MANAGER],
+  guardian: [RoleCode.STUDENT, RoleCode.PARENT],
+  library: [RoleCode.LIBRARIAN],
+  transport: [RoleCode.TRANSPORT_MANAGER],
+  hostel: [RoleCode.HOSTEL_WARDEN],
+  inventory: [RoleCode.PROCUREMENT_MANAGER],
+  frontdesk: [RoleCode.FRONT_DESK],
   general: []
-};
-
-const ROLE_NAV_LABELS: Partial<Record<ExperienceRoleKey, Record<string, string>>> = {
-  admin: {
-    "/dashboard/users": "User Control",
-    "/dashboard/settings": "System Config",
-    "/dashboard/audit": "Audit Logs"
-  },
-  leadership: {
-    "/dashboard/reports": "Academic Reports",
-    "/dashboard/notices": "Announcements",
-    "/dashboard/leaves": "Leave Reviews"
-  },
-  teaching: {
-    "/dashboard/students": "My Students",
-    "/dashboard/attendance": "Class Attendance",
-    "/dashboard/exams": "Marks & Tests",
-    "/dashboard/notices": "Staff Updates"
-  },
-  finance: {
-    "/dashboard/fees": "Fee Desk",
-    "/dashboard/accounts": "Expense Desk",
-    "/dashboard/payroll": "Salary Desk",
-    "/dashboard/reports": "Finance Reports"
-  },
-  guardian: {
-    "/dashboard/documents": "Assignments",
-    "/dashboard/fees": "Fee Dues",
-    "/dashboard/exams": "Progress"
-  },
-  library: {
-    "/dashboard/library": "Circulation Desk"
-  },
-  transport: {
-    "/dashboard/transport": "Route Control"
-  },
-  hostel: {
-    "/dashboard/hostel": "Residential Desk"
-  },
-  inventory: {
-    "/dashboard/inventory": "Stock Control",
-    "/dashboard/accounts": "Purchase Spend"
-  },
-  frontdesk: {
-    "/dashboard/students": "Admissions",
-    "/dashboard/documents": "Inward Docs",
-    "/dashboard/notices": "Desk Notices"
-  }
-};
-
-const ROLE_ROUTE_ORDER: Record<ExperienceRoleKey, string[]> = {
-  admin: ["/dashboard/users", "/dashboard/settings", "/dashboard/audit", "/dashboard/reports", "/dashboard"],
-  leadership: ["/dashboard/reports", "/dashboard/leaves", "/dashboard/notices", "/dashboard/attendance", "/dashboard"],
-  teaching: ["/dashboard/attendance", "/dashboard/exams", "/dashboard/students", "/dashboard/notices", "/dashboard"],
-  finance: ["/dashboard/fees", "/dashboard/accounts", "/dashboard/payroll", "/dashboard/reports", "/dashboard"],
-  guardian: ["/dashboard", "/dashboard/fees", "/dashboard/exams", "/dashboard/documents"],
-  library: ["/dashboard/library", "/dashboard/reports", "/dashboard"],
-  transport: ["/dashboard/transport", "/dashboard/reports", "/dashboard"],
-  hostel: ["/dashboard/hostel", "/dashboard/reports", "/dashboard"],
-  inventory: ["/dashboard/inventory", "/dashboard/accounts", "/dashboard/reports", "/dashboard"],
-  frontdesk: ["/dashboard/students", "/dashboard/documents", "/dashboard/notices", "/dashboard"],
-  general: ["/dashboard"]
 };
 
 const ROLE_WORKSPACE_PREFIX: Record<ExperienceRoleKey, string> = {
@@ -140,41 +77,12 @@ export function resolveExperienceRole(roleHints: string[]) {
   ];
 
   for (const role of orderedRoles) {
-    if (ROLE_ALIASES[role].some((alias) => normalized.has(alias))) {
+    if (ROLE_GROUPS[role].some((alias) => normalized.has(alias))) {
       return role;
     }
   }
 
   return "general";
-}
-
-export function getVisibleNavItems(permissions: string[], roleHints: string[]) {
-  const roleKey = resolveExperienceRole(roleHints);
-  const overrides = ROLE_NAV_LABELS[roleKey] ?? {};
-
-  return NAV_ITEMS.filter((item) => !item.permission || permissions.includes(item.permission)).map((item) => ({
-    ...item,
-    label: overrides[item.href] ?? item.label
-  })) satisfies NavItem[];
-}
-
-export function getDefaultDashboardRoute(session: Pick<AppSession, "roles" | "permissions">) {
-  const roleKey = resolveExperienceRole(session.roles);
-  const preferredRoutes = ROLE_ROUTE_ORDER[roleKey] ?? ROLE_ROUTE_ORDER.general;
-
-  for (const href of preferredRoutes) {
-    const navItem = NAV_ITEMS.find((item) => item.href === href);
-    if (!navItem) {
-      continue;
-    }
-
-    if (!navItem.permission || session.permissions.includes(navItem.permission)) {
-      return href;
-    }
-  }
-
-  const firstAllowed = NAV_ITEMS.find((item) => !item.permission || session.permissions.includes(item.permission));
-  return firstAllowed?.href ?? "/dashboard";
 }
 
 export function getWorkspaceAccessCopy(roleKey: ExperienceRoleKey, workspace: WorkspaceKey) {

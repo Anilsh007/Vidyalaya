@@ -1,22 +1,29 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Archive, FileText, FolderOpen, PencilLine } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { archiveDocumentAction } from "@/app/(dashboard)/dashboard/documents/actions";
+import { archiveDocumentSubmitAction } from "@/app/(dashboard)/dashboard/documents/actions";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/access";
+import { requireAnyPermission } from "@/lib/rbac/guards";
 import { db } from "@/lib/db";
 import { documentOwnerLabel, documentOwnerTypeLabel, formatFileSize } from "@/lib/documents";
-import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { parentCanAccessDocument, studentCanAccessDocument } from "@/lib/rbac/scope";
 
 type Params = Promise<{ documentId: string }>;
 
 export default async function DocumentProfilePage({ params }: { params: Params }) {
-  const session = await requirePermission(PERMISSIONS.viewDocuments);
+  const session = await requireAnyPermission([
+    RBAC_PERMISSIONS.documentsRead,
+    RBAC_PERMISSIONS.documentsReadOwn,
+    RBAC_PERMISSIONS.documentsReadChild,
+    RBAC_PERMISSIONS.documentsUpdate,
+    RBAC_PERMISSIONS.documentsArchive
+  ]);
   const { documentId } = await params;
   const document = await db.document.findFirst({
     where: { id: documentId, schoolId: session.schoolId },
@@ -25,6 +32,25 @@ export default async function DocumentProfilePage({ params }: { params: Params }
 
   if (!document) {
     notFound();
+  }
+
+  const hasBroadDocumentAccess =
+    session.permissions.includes(RBAC_PERMISSIONS.documentsRead) ||
+    session.permissions.includes(RBAC_PERMISSIONS.documentsUpdate) ||
+    session.permissions.includes(RBAC_PERMISSIONS.documentsArchive) ||
+    session.permissions.includes(RBAC_PERMISSIONS.documentsUpload);
+
+  if (!hasBroadDocumentAccess) {
+    const allowed =
+      session.roles.includes("STUDENT")
+        ? await studentCanAccessDocument(session, document.id)
+        : session.roles.includes("PARENT")
+          ? await parentCanAccessDocument(session, document.id)
+          : false;
+
+    if (!allowed) {
+      redirect("/forbidden");
+    }
   }
 
   const auditLogs = await db.auditLog.findMany({
@@ -39,7 +65,9 @@ export default async function DocumentProfilePage({ params }: { params: Params }
     take: 10
   });
 
-  const canManageDocuments = session.permissions.includes(PERMISSIONS.manageDocuments);
+  const canManageDocuments =
+    session.permissions.includes(RBAC_PERMISSIONS.documentsUpdate) ||
+    session.permissions.includes(RBAC_PERMISSIONS.documentsArchive);
 
   return (
     <div className="grid gap-6">
@@ -57,7 +85,7 @@ export default async function DocumentProfilePage({ params }: { params: Params }
                 </Button>
               </Link>
               {!document.isArchived ? (
-                <form action={archiveDocumentAction}>
+                <form action={archiveDocumentSubmitAction}>
                   <input type="hidden" name="documentId" value={document.id} />
                   <Button variant="danger">
                     <Archive className="h-4 w-4" />

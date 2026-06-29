@@ -2,13 +2,13 @@
 
 import { initialActionFormState } from "@/lib/forms";
 import {
-  SPECIFIC_ROLE_DEFINITIONS,
-  SPECIFIC_ROLES_BY_CATEGORY,
   ROLE_CATEGORIES,
   ROLE_CATEGORY_LABELS,
   type RoleCategory,
   type SpecificRoleKey,
-  getSpecificRoleDefinition
+  type UserSelectOption,
+  getSpecificRoleDefinition,
+  getSpecificRoleOptions
 } from "@/lib/user-management";
 import { saveUserAction } from "@/app/(dashboard)/dashboard/users/actions";
 import { FieldError } from "@/components/school/field-error";
@@ -21,14 +21,6 @@ import { Select } from "@/components/ui/select";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { CheckCheck, CopyPlus, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { useActionState, useEffect, useMemo, useState } from "react";
-
-type Option = {
-  id: string;
-  label: string;
-  meta?: string;
-  searchText?: string;
-  category?: RoleCategory;
-};
 
 export type UserFormValues = {
   id?: string;
@@ -68,10 +60,11 @@ type UserFormProps = {
   description?: string;
   submitLabel: string;
   values: UserFormValues;
-  hodOptions: Option[];
-  staffOptions: Option[];
-  parentOptions: Option[];
-  studentOptions: Option[];
+  hodOptions: UserSelectOption[];
+  staffOptions: UserSelectOption[];
+  parentOptions: UserSelectOption[];
+  studentOptions: UserSelectOption[];
+  allowedSpecificRoleKeys: SpecificRoleKey[];
   onHandoverReady?: (payload: UserHandoverPayload) => void;
   onNotify?: (input: { title: string; description?: string; tone: "success" | "error" | "info" }) => void;
   onSuccess?: () => void;
@@ -86,6 +79,7 @@ export function UserForm({
   staffOptions,
   parentOptions,
   studentOptions,
+  allowedSpecificRoleKeys,
   onHandoverReady,
   onNotify,
   onSuccess
@@ -102,9 +96,15 @@ export function UserForm({
   const roleOptions = useMemo(
     () =>
       roleCategory
-        ? SPECIFIC_ROLES_BY_CATEGORY[roleCategory].map((key) => SPECIFIC_ROLE_DEFINITIONS[key])
+        ? getSpecificRoleOptions(roleCategory, allowedSpecificRoleKeys)
         : [],
-    [roleCategory]
+    [allowedSpecificRoleKeys, roleCategory]
+  );
+
+  const allowedRoleCategories = useMemo(
+    () =>
+      ROLE_CATEGORIES.filter((category) => getSpecificRoleOptions(category, allowedSpecificRoleKeys).length > 0),
+    [allowedSpecificRoleKeys]
   );
 
   useEffect(() => {
@@ -257,7 +257,7 @@ export function UserForm({
                 placeholder="Select"
                 onChange={(event) => setRoleCategory(event.target.value as RoleCategory | "")}
               >
-                {ROLE_CATEGORIES.map((category) => (
+                {allowedRoleCategories.map((category) => (
                   <option key={category} value={category}>
                     {ROLE_CATEGORY_LABELS[category]}
                   </option>
@@ -441,7 +441,7 @@ function SimpleProfileSelect({
   selectedValue: string;
   fieldName: string;
   fieldId: string;
-  options: Option[];
+  options: UserSelectOption[];
   emptyLabel: string;
 }) {
   return (
@@ -476,7 +476,7 @@ function MultiSelectLookup({
   onSearchValueChange: (value: string) => void;
   selectedValues: string[];
   onSelectedValuesChange: (value: string[]) => void;
-  options: Option[];
+  options: UserSelectOption[];
 }) {
   function toggleSelection(id: string) {
     onSelectedValuesChange(
@@ -538,7 +538,7 @@ function MultiSelectLookup({
   );
 }
 
-function filterOptions(options: Option[], query: string, fallbackScope: string) {
+function filterOptions(options: UserSelectOption[], query: string, fallbackScope: string) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
     return options;

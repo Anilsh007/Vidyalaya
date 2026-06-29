@@ -8,9 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { payrollPeriodLabel } from "@/lib/payroll";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getPayrollPageData } from "@/lib/services/payroll.service";
 import { formatCurrency } from "@/lib/utils";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
@@ -18,30 +18,8 @@ export default async function PayrollPage() {
   const session = await requirePermission(PERMISSIONS.viewPayroll);
   const canManagePayroll = session.permissions.includes(PERMISSIONS.managePayroll);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "payroll");
-
-  const [staffWithSalary, payrollRuns, payrollSlips] = await Promise.all([
-    db.staff.findMany({
-      where: { schoolId: session.schoolId, isArchived: false, salaryAmount: { not: null } },
-      orderBy: [{ fullName: "asc" }]
-    }),
-    db.payrollRun.findMany({
-      where: { schoolId: session.schoolId },
-      include: { slips: true },
-      orderBy: [{ periodYear: "desc" }, { periodMonth: "desc" }],
-      take: 12
-    }),
-    db.payrollSlip.findMany({
-      where: { schoolId: session.schoolId },
-      include: { payrollRun: true, staff: true },
-      orderBy: [{ createdAt: "desc" }],
-      take: 60
-    })
-  ]);
-
-  const monthlyPayroll = staffWithSalary.reduce((sum, member) => sum + Number(member.salaryAmount ?? 0), 0);
-  const draftSlips = payrollSlips.filter((slip) => slip.status === "DRAFT");
-  const paidThisCycle = payrollSlips.filter((slip) => slip.status === "PAID").reduce((sum, slip) => sum + Number(slip.netPay), 0);
-  const latestRun = payrollRuns[0];
+  const { staffWithSalary, payrollRuns, payrollSlips, monthlyPayroll, draftSlips, paidThisCycle, latestRun } =
+    await getPayrollPageData({ schoolId: session.schoolId });
 
   return (
     <div className="grid gap-6">

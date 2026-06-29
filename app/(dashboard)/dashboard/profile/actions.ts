@@ -3,11 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { verifyPassword, hashPassword } from "@/lib/auth/password";
+import { verifyPassword, hashPassword, validatePasswordPolicy } from "@/lib/auth/password";
 import { recordAuditLog } from "@/lib/audit";
+import { recordSecurityAuditEvent } from "@/lib/audit/audit.service";
 import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { getRequiredSession } from "@/lib/auth/session";
+import { requireCurrentUser } from "@/lib/auth/current-user";
 import { passwordChangeSchema, profileUpdateSchema } from "@/lib/user-management";
 
 function getString(formData: FormData, key: string) {
@@ -19,7 +20,7 @@ export async function updateMyProfileAction(
   formData: FormData
 ): Promise<ActionFormState> {
   void _prevState;
-  const session = await getRequiredSession();
+  const { session } = await requireCurrentUser();
   const parsed = profileUpdateSchema.safeParse({
     fullName: getString(formData, "fullName"),
     email: getString(formData, "email"),
@@ -116,7 +117,7 @@ export async function changeMyPasswordAction(
   formData: FormData
 ): Promise<ActionFormState> {
   void _prevState;
-  const session = await getRequiredSession();
+  const { session } = await requireCurrentUser();
   const parsed = passwordChangeSchema.safeParse({
     currentPassword: getString(formData, "currentPassword"),
     newPassword: getString(formData, "newPassword"),
@@ -136,9 +137,27 @@ export async function changeMyPasswordAction(
   });
 
   if (!user || !verifyPassword(parsed.data.currentPassword, user.passwordHash)) {
+    await recordSecurityAuditEvent({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: "auth.password_change.failed",
+      entityType: "User",
+      entityId: session.userId
+    });
     return {
       status: "error",
       message: "Current password is not correct."
+    };
+  }
+
+  const passwordPolicyError = validatePasswordPolicy(parsed.data.newPassword);
+  if (passwordPolicyError) {
+    return {
+      status: "error",
+      message: passwordPolicyError,
+      fieldErrors: {
+        newPassword: [passwordPolicyError]
+      }
     };
   }
 

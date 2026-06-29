@@ -15,14 +15,7 @@ import { useToast } from "@/components/ui/toast";
 import { CheckCircle2, Copy, MessageCircleMore, Printer, Share2, UserCog } from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-
-type Option = {
-  id: string;
-  label: string;
-  meta?: string;
-  searchText?: string;
-  category?: UserFormValues["roleCategory"];
-};
+import type { SpecificRoleKey, UserSelectOption } from "@/lib/user-management";
 
 type UserGridItem = {
   id: string;
@@ -51,10 +44,11 @@ type UserControlConsoleProps = {
   users: UserGridItem[];
   isSuperAdmin: boolean;
   createValues: UserFormValues;
-  hodOptions: Option[];
-  staffOptions: Option[];
-  parentOptions: Option[];
-  studentOptions: Option[];
+  hodOptions: UserSelectOption[];
+  staffOptions: UserSelectOption[];
+  parentOptions: UserSelectOption[];
+  studentOptions: UserSelectOption[];
+  allowedSpecificRoleKeys: SpecificRoleKey[];
 };
 
 export function UserControlConsole({
@@ -64,7 +58,8 @@ export function UserControlConsole({
   hodOptions,
   staffOptions,
   parentOptions,
-  studentOptions
+  studentOptions,
+  allowedSpecificRoleKeys
 }: UserControlConsoleProps) {
   const { pushToast } = useToast();
   const router = useRouter();
@@ -309,6 +304,7 @@ export function UserControlConsole({
               staffOptions={staffOptions}
               parentOptions={parentOptions}
               studentOptions={studentOptions}
+              allowedSpecificRoleKeys={allowedSpecificRoleKeys}
               onHandoverReady={setHandover}
               onNotify={notify}
             />
@@ -536,6 +532,7 @@ export function UserControlConsole({
         staffOptions={staffOptions}
         parentOptions={parentOptions}
         studentOptions={studentOptions}
+        allowedSpecificRoleKeys={allowedSpecificRoleKeys}
         onHandoverReady={setHandover}
         onNotify={notify}
       />
@@ -566,6 +563,7 @@ function UserAccountDialog({
   staffOptions,
   parentOptions,
   studentOptions,
+  allowedSpecificRoleKeys,
   onHandoverReady,
   onNotify
 }: {
@@ -587,10 +585,11 @@ function UserAccountDialog({
   onDeleteUser: () => void;
   onShareAction: (mode: "select" | "copy" | "whatsapp" | "print") => void;
   buildFormValues: (user: UserGridItem) => UserFormValues;
-  hodOptions: Option[];
-  staffOptions: Option[];
-  parentOptions: Option[];
-  studentOptions: Option[];
+  hodOptions: UserSelectOption[];
+  staffOptions: UserSelectOption[];
+  parentOptions: UserSelectOption[];
+  studentOptions: UserSelectOption[];
+  allowedSpecificRoleKeys: SpecificRoleKey[];
   onHandoverReady: (payload: UserHandoverPayload) => void;
   onNotify: (input: { title: string; description?: string; tone: "success" | "error" | "info" }) => void;
 }) {
@@ -710,6 +709,7 @@ function UserAccountDialog({
                 staffOptions={staffOptions}
                 parentOptions={parentOptions}
                 studentOptions={studentOptions}
+                allowedSpecificRoleKeys={allowedSpecificRoleKeys}
                 onHandoverReady={onHandoverReady}
                 onNotify={onNotify}
                 onSuccess={onClose}

@@ -1,14 +1,20 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { HostelAllocationStatus, Prisma } from "@prisma/client";
+import { HostelAllocationStatus } from "@prisma/client";
 
 import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { hostelAllocationSchema, hostelRoomSchema, hostelSchema } from "@/lib/hostel";
 import { PERMISSIONS } from "@/lib/permissions";
+import {
+  archiveHostel,
+  archiveHostelRoom,
+  saveHostel,
+  saveHostelAllocation,
+  saveHostelRoom
+} from "@/lib/services/hostel.service";
+import { hostelAllocationSchema, hostelRoomSchema, hostelSchema } from "@/lib/validations/hostel";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -17,11 +23,6 @@ function getString(formData: FormData, key: string) {
 function getOptionalString(formData: FormData, key: string) {
   const value = getString(formData, key).trim();
   return value || undefined;
-}
-
-function toDate(value?: string | null, endOfDay = false) {
-  if (!value) return null;
-  return new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
 }
 
 export async function saveHostelAction(
@@ -46,35 +47,16 @@ export async function saveHostelAction(
   const data = parsed.data;
 
   try {
-    const hostel = data.id
-      ? await (async () => {
-          const existing = await db.hostel.findFirst({ where: { id: data.id, schoolId: session.schoolId }, select: { id: true } });
-          if (!existing) throw new Error("Hostel not found.");
-          return db.hostel.update({
-            where: { id: existing.id },
-            data: {
-              name: data.name,
-              code: data.code,
-              wardenName: data.wardenName || null,
-              wardenPhone: data.wardenPhone || null,
-              address: data.address || null,
-              isActive: data.isActive === "yes",
-              isArchived: false,
-              archivedAt: null
-            }
-          });
-        })()
-      : await db.hostel.create({
-          data: {
-            schoolId: session.schoolId,
-            name: data.name,
-            code: data.code,
-            wardenName: data.wardenName || null,
-            wardenPhone: data.wardenPhone || null,
-            address: data.address || null,
-            isActive: data.isActive === "yes"
-          }
-        });
+    const hostel = await saveHostel({
+      schoolId: session.schoolId,
+      id: data.id,
+      name: data.name,
+      code: data.code,
+      wardenName: data.wardenName,
+      wardenPhone: data.wardenPhone,
+      address: data.address,
+      isActive: data.isActive
+    });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -113,25 +95,18 @@ export async function saveHostelRoomAction(
   }
 
   const data = parsed.data;
-  const roomData = {
-    hostelId: data.hostelId,
-    roomNumber: data.roomNumber,
-    floor: data.floor || null,
-    roomType: data.roomType || null,
-    capacity: data.capacity,
-    monthlyFee: data.monthlyFee === undefined || data.monthlyFee === "" ? null : new Prisma.Decimal(data.monthlyFee),
-    isActive: data.isActive === "yes",
-    isArchived: false,
-    archivedAt: null
-  };
-
   try {
-    const hostel = await db.hostel.findFirst({ where: { id: data.hostelId, schoolId: session.schoolId }, select: { id: true } });
-    if (!hostel) throw new Error("Hostel not found.");
-
-    const room = data.id
-      ? await db.hostelRoom.update({ where: { id: data.id }, data: roomData })
-      : await db.hostelRoom.create({ data: { schoolId: session.schoolId, ...roomData } });
+    const room = await saveHostelRoom({
+      schoolId: session.schoolId,
+      id: data.id,
+      hostelId: data.hostelId,
+      roomNumber: data.roomNumber,
+      floor: data.floor,
+      roomType: data.roomType,
+      capacity: data.capacity,
+      monthlyFee: data.monthlyFee,
+      isActive: data.isActive
+    });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -175,29 +150,20 @@ export async function saveHostelAllocationAction(
   const data = parsed.data;
 
   try {
-    const room = await db.hostelRoom.findFirst({
-      where: { id: data.roomId, schoolId: session.schoolId, hostelId: data.hostelId, isArchived: false },
-      include: { allocations: { where: { status: "ACTIVE" } } }
-    });
-    if (!room) throw new Error("Room not found.");
-    if (!data.id && room.allocations.length >= room.capacity) throw new Error("Selected room is already full.");
-
-    const allocationData = {
+    const allocation = await saveHostelAllocation({
+      schoolId: session.schoolId,
+      id: data.id,
       studentId: data.studentId,
       hostelId: data.hostelId,
       roomId: data.roomId,
-      bedNumber: data.bedNumber || null,
-      startDate: toDate(data.startDate)!,
-      endDate: toDate(data.endDate, true),
+      bedNumber: data.bedNumber,
+      startDate: data.startDate,
+      endDate: data.endDate,
       status: data.status as HostelAllocationStatus,
-      monthlyFee: data.monthlyFee === undefined || data.monthlyFee === "" ? null : new Prisma.Decimal(data.monthlyFee),
-      guardianConsent: data.guardianConsent === "yes",
-      remarks: data.remarks || null
-    };
-
-    const allocation = data.id
-      ? await db.hostelAllocation.update({ where: { id: data.id }, data: allocationData })
-      : await db.hostelAllocation.create({ data: { schoolId: session.schoolId, ...allocationData } });
+      monthlyFee: data.monthlyFee,
+      guardianConsent: data.guardianConsent,
+      remarks: data.remarks
+    });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -219,7 +185,7 @@ export async function archiveHostelAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.manageHostel);
   const id = getString(formData, "hostelId");
   if (!id) return;
-  await db.hostel.updateMany({ where: { id, schoolId: session.schoolId }, data: { isArchived: true, isActive: false, archivedAt: new Date() } });
+  await archiveHostel({ schoolId: session.schoolId, hostelId: id });
   revalidatePath("/dashboard/hostel");
 }
 
@@ -227,6 +193,6 @@ export async function archiveHostelRoomAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.manageHostel);
   const id = getString(formData, "roomId");
   if (!id) return;
-  await db.hostelRoom.updateMany({ where: { id, schoolId: session.schoolId }, data: { isArchived: true, isActive: false, archivedAt: new Date() } });
+  await archiveHostelRoom({ schoolId: session.schoolId, roomId: id });
   revalidatePath("/dashboard/hostel");
 }

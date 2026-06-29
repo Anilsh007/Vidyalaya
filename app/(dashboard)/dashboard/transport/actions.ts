@@ -1,19 +1,26 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma, TransportAssignmentStatus } from "@prisma/client";
+import { TransportAssignmentStatus } from "@prisma/client";
 
 import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
 import { PERMISSIONS } from "@/lib/permissions";
+import {
+  archiveTransportRoute,
+  archiveTransportVehicle,
+  saveTransportAssignment,
+  saveTransportRoute,
+  saveTransportStop,
+  saveTransportVehicle
+} from "@/lib/services/transport.service";
 import {
   transportAssignmentSchema,
   transportRouteSchema,
   transportStopSchema,
   transportVehicleSchema
-} from "@/lib/transport";
+} from "@/lib/validations/transport";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -22,11 +29,6 @@ function getString(formData: FormData, key: string) {
 function getOptionalString(formData: FormData, key: string) {
   const value = getString(formData, key).trim();
   return value || undefined;
-}
-
-function toDate(value?: string | null, endOfDay = false) {
-  if (!value) return null;
-  return new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
 }
 
 export async function saveTransportVehicleAction(
@@ -58,44 +60,19 @@ export async function saveTransportVehicleAction(
   const data = parsed.data;
 
   try {
-    const vehicle = data.id
-      ? await (async () => {
-          const existing = await db.transportVehicle.findFirst({
-            where: { id: data.id, schoolId: session.schoolId },
-            select: { id: true }
-          });
-          if (!existing) throw new Error("Vehicle not found.");
-          return db.transportVehicle.update({
-            where: { id: existing.id },
-            data: {
-              vehicleNumber: data.vehicleNumber,
-              vehicleType: data.vehicleType,
-              capacity: data.capacity,
-              driverName: data.driverName || null,
-              driverPhone: data.driverPhone || null,
-              helperName: data.helperName || null,
-              insuranceValidUntil: toDate(data.insuranceValidUntil),
-              fitnessValidUntil: toDate(data.fitnessValidUntil),
-              isActive: data.isActive === "yes",
-              isArchived: false,
-              archivedAt: null
-            }
-          });
-        })()
-      : await db.transportVehicle.create({
-          data: {
-            schoolId: session.schoolId,
-            vehicleNumber: data.vehicleNumber,
-            vehicleType: data.vehicleType,
-            capacity: data.capacity,
-            driverName: data.driverName || null,
-            driverPhone: data.driverPhone || null,
-            helperName: data.helperName || null,
-            insuranceValidUntil: toDate(data.insuranceValidUntil),
-            fitnessValidUntil: toDate(data.fitnessValidUntil),
-            isActive: data.isActive === "yes"
-          }
-        });
+    const vehicle = await saveTransportVehicle({
+      schoolId: session.schoolId,
+      id: data.id,
+      vehicleNumber: data.vehicleNumber,
+      vehicleType: data.vehicleType,
+      capacity: data.capacity,
+      driverName: data.driverName,
+      driverPhone: data.driverPhone,
+      helperName: data.helperName,
+      insuranceValidUntil: data.insuranceValidUntil,
+      fitnessValidUntil: data.fitnessValidUntil,
+      isActive: data.isActive
+    });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -138,32 +115,19 @@ export async function saveTransportRouteAction(
   }
 
   const data = parsed.data;
-  const routeData = {
-    vehicleId: data.vehicleId || null,
-    name: data.name,
-    code: data.code,
-    startPoint: data.startPoint || null,
-    endPoint: data.endPoint || null,
-    monthlyFee:
-      data.monthlyFee === undefined || data.monthlyFee === ""
-        ? null
-        : new Prisma.Decimal(data.monthlyFee),
-    isActive: data.isActive === "yes",
-    isArchived: false,
-    archivedAt: null
-  };
 
   try {
-    const route = data.id
-      ? await (async () => {
-          const existing = await db.transportRoute.findFirst({
-            where: { id: data.id, schoolId: session.schoolId },
-            select: { id: true }
-          });
-          if (!existing) throw new Error("Route not found.");
-          return db.transportRoute.update({ where: { id: existing.id }, data: routeData });
-        })()
-      : await db.transportRoute.create({ data: { schoolId: session.schoolId, ...routeData } });
+    const route = await saveTransportRoute({
+      schoolId: session.schoolId,
+      id: data.id,
+      vehicleId: data.vehicleId,
+      name: data.name,
+      code: data.code,
+      startPoint: data.startPoint,
+      endPoint: data.endPoint,
+      monthlyFee: data.monthlyFee,
+      isActive: data.isActive
+    });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -206,33 +170,15 @@ export async function saveTransportStopAction(
   const data = parsed.data;
 
   try {
-    const route = await db.transportRoute.findFirst({
-      where: { id: data.routeId, schoolId: session.schoolId },
-      select: { id: true }
+    const stop = await saveTransportStop({
+      schoolId: session.schoolId,
+      id: data.id,
+      routeId: data.routeId,
+      name: data.name,
+      pickupTime: data.pickupTime,
+      dropTime: data.dropTime,
+      stopOrder: data.stopOrder
     });
-    if (!route) throw new Error("Route not found.");
-
-    const stop = data.id
-      ? await db.transportStop.update({
-          where: { id: data.id },
-          data: {
-            routeId: data.routeId,
-            name: data.name,
-            pickupTime: data.pickupTime || null,
-            dropTime: data.dropTime || null,
-            stopOrder: data.stopOrder
-          }
-        })
-      : await db.transportStop.create({
-          data: {
-            schoolId: session.schoolId,
-            routeId: data.routeId,
-            name: data.name,
-            pickupTime: data.pickupTime || null,
-            dropTime: data.dropTime || null,
-            stopOrder: data.stopOrder
-          }
-        });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -276,39 +222,20 @@ export async function saveTransportAssignmentAction(
   }
 
   const data = parsed.data;
-  const assignmentData = {
-    studentId: data.studentId,
-    routeId: data.routeId,
-    stopId: data.stopId || null,
-    startDate: toDate(data.startDate)!,
-    endDate: toDate(data.endDate, true),
-    status: data.status as TransportAssignmentStatus,
-    monthlyFee:
-      data.monthlyFee === undefined || data.monthlyFee === ""
-        ? null
-        : new Prisma.Decimal(data.monthlyFee),
-    remarks: data.remarks || null
-  };
 
   try {
-    const student = await db.student.findFirst({
-      where: { id: data.studentId, schoolId: session.schoolId },
-      select: { id: true }
+    const assignment = await saveTransportAssignment({
+      schoolId: session.schoolId,
+      id: data.id,
+      studentId: data.studentId,
+      routeId: data.routeId,
+      stopId: data.stopId,
+      startDate: data.startDate,
+      endDate: data.endDate,
+      status: data.status as TransportAssignmentStatus,
+      monthlyFee: data.monthlyFee,
+      remarks: data.remarks
     });
-    if (!student) throw new Error("Student not found.");
-
-    const assignment = data.id
-      ? await (async () => {
-          const existing = await db.transportAssignment.findFirst({
-            where: { id: data.id, schoolId: session.schoolId },
-            select: { id: true }
-          });
-          if (!existing) throw new Error("Transport assignment not found.");
-          return db.transportAssignment.update({ where: { id: existing.id }, data: assignmentData });
-        })()
-      : await db.transportAssignment.create({
-          data: { schoolId: session.schoolId, ...assignmentData }
-        });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -330,10 +257,7 @@ export async function archiveTransportVehicleAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.manageTransport);
   const id = getString(formData, "vehicleId");
   if (!id) return;
-  await db.transportVehicle.updateMany({
-    where: { id, schoolId: session.schoolId },
-    data: { isArchived: true, isActive: false, archivedAt: new Date() }
-  });
+  await archiveTransportVehicle({ schoolId: session.schoolId, vehicleId: id });
   revalidatePath("/dashboard/transport");
 }
 
@@ -341,9 +265,6 @@ export async function archiveTransportRouteAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.manageTransport);
   const id = getString(formData, "routeId");
   if (!id) return;
-  await db.transportRoute.updateMany({
-    where: { id, schoolId: session.schoolId },
-    data: { isArchived: true, isActive: false, archivedAt: new Date() }
-  });
+  await archiveTransportRoute({ schoolId: session.schoolId, routeId: id });
   revalidatePath("/dashboard/transport");
 }

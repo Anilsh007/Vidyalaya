@@ -13,8 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getInventoryPageData } from "@/lib/services/inventory.service";
 import { formatCurrency } from "@/lib/utils";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
@@ -32,58 +32,13 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
   const stock = asSingle(params.stock) ?? "";
   const canManageInventory = session.permissions.includes(PERMISSIONS.manageInventory);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "inventory");
-
-  const [items, allItems, movements] = await Promise.all([
-    db.inventoryItem.findMany({
-      where: {
-        schoolId: session.schoolId,
-        isArchived: false,
-        ...(category ? { category } : {}),
-        ...(query
-          ? {
-              OR: [
-                { name: { contains: query, mode: "insensitive" } },
-                { itemCode: { contains: query, mode: "insensitive" } },
-                { category: { contains: query, mode: "insensitive" } },
-                { supplierName: { contains: query, mode: "insensitive" } }
-              ]
-            }
-          : {})
-      },
-      include: {
-        movements: {
-          orderBy: { movementDate: "desc" },
-          take: 1
-        }
-      },
-      orderBy: [{ name: "asc" }]
-    }),
-    db.inventoryItem.findMany({
-      where: { schoolId: session.schoolId, isArchived: false },
-      select: { category: true, quantityOnHand: true, minimumQuantity: true, unitCost: true }
-    }),
-    db.inventoryMovement.findMany({
-      where: { schoolId: session.schoolId },
-      include: { item: true },
-      orderBy: [{ movementDate: "desc" }, { createdAt: "desc" }],
-      take: 14
-    })
-  ]);
-
-  const filteredItems = items.filter((item) => {
-    if (stock === "low") return item.quantityOnHand <= item.minimumQuantity;
-    if (stock === "out") return item.quantityOnHand === 0;
-    return true;
-  });
-  const categories = Array.from(
-    new Set(allItems.map((item) => item.category).filter((value): value is string => Boolean(value)))
-  ).sort((a, b) => a.localeCompare(b));
-  const lowStockCount = allItems.filter((item) => item.quantityOnHand <= item.minimumQuantity).length;
-  const outOfStockCount = allItems.filter((item) => item.quantityOnHand === 0).length;
-  const stockValue = allItems.reduce(
-    (sum, item) => sum + item.quantityOnHand * (item.unitCost ? Number(item.unitCost) : 0),
-    0
-  );
+  const { allItems, filteredItems, movements, categories, lowStockCount, outOfStockCount, stockValue } =
+    await getInventoryPageData({
+      schoolId: session.schoolId,
+      query,
+      category,
+      stock
+    });
 
   return (
     <div className="grid gap-6">

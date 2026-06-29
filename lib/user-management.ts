@@ -1,5 +1,14 @@
-import { RoleCode, UserType } from "@prisma/client";
+import { RoleCode } from "@prisma/client";
 import { z } from "zod";
+
+import {
+  canAssignRole,
+  RBAC_ROLE_CODES,
+  ROLE_GROUP_BY_CODE,
+  ROLE_LABELS,
+  getAssignableRoleCodes,
+  roleCodeToUserType
+} from "@/lib/rbac/roles";
 
 export const ROLE_CATEGORIES = [
   "MANAGEMENT",
@@ -12,6 +21,14 @@ export const ROLE_CATEGORIES = [
 
 export type RoleCategory = (typeof ROLE_CATEGORIES)[number];
 
+export type UserSelectOption = {
+  id: string;
+  label: string;
+  meta?: string;
+  searchText?: string;
+  category?: RoleCategory;
+};
+
 export const ROLE_CATEGORY_LABELS: Record<RoleCategory, string> = {
   MANAGEMENT: "Management",
   ACADEMICS: "Academics",
@@ -21,13 +38,17 @@ export const ROLE_CATEGORY_LABELS: Record<RoleCategory, string> = {
   PRIMARY_USERS: "Primary Users"
 };
 
+export const USER_LINK_TYPES = ["none", "staff", "parent", "student"] as const;
+export type UserLinkType = (typeof USER_LINK_TYPES)[number];
+
 export const SPECIFIC_ROLE_KEYS = [
   "SUPER_ADMIN",
   "ADMIN",
   "PRINCIPAL",
   "DIRECTOR",
-  "TEACHER",
+  "HR",
   "HOD",
+  "TEACHER",
   "EXAM_CONTROLLER",
   "ACCOUNTANT",
   "PROCUREMENT_MANAGER",
@@ -35,10 +56,10 @@ export const SPECIFIC_ROLE_KEYS = [
   "TRANSPORT_MANAGER",
   "HOSTEL_WARDEN",
   "FRONT_DESK",
-  "SECURITY_GUARD",
-  "PEON",
-  "MAINTENANCE_TECHNICIAN",
   "NURSE",
+  "SECURITY_GUARD",
+  "MAINTENANCE_TECHNICIAN",
+  "PEON",
   "STUDENT",
   "PARENT"
 ] as const;
@@ -55,9 +76,6 @@ type SpecificRoleDefinition = {
   managementBypass?: boolean;
   marksDepartmentHead?: boolean;
 };
-
-export const USER_LINK_TYPES = ["none", "staff", "parent", "student"] as const;
-export type UserLinkType = (typeof USER_LINK_TYPES)[number];
 
 export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefinition> = {
   SUPER_ADMIN: {
@@ -89,9 +107,26 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     key: "DIRECTOR",
     label: "Director",
     category: "MANAGEMENT",
-    roleCode: RoleCode.PRINCIPAL,
+    roleCode: RoleCode.DIRECTOR,
     linkedProfileType: "staff",
     designation: "Director",
+    marksDepartmentHead: true
+  },
+  HR: {
+    key: "HR",
+    label: "HR",
+    category: "MANAGEMENT",
+    roleCode: RoleCode.HR,
+    linkedProfileType: "staff",
+    designation: "HR Manager"
+  },
+  HOD: {
+    key: "HOD",
+    label: "HOD",
+    category: "ACADEMICS",
+    roleCode: RoleCode.HOD,
+    linkedProfileType: "staff",
+    designation: "HOD",
     marksDepartmentHead: true
   },
   TEACHER: {
@@ -102,20 +137,11 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     linkedProfileType: "staff",
     designation: "Teacher"
   },
-  HOD: {
-    key: "HOD",
-    label: "HOD",
-    category: "ACADEMICS",
-    roleCode: RoleCode.TEACHER,
-    linkedProfileType: "staff",
-    designation: "HOD",
-    marksDepartmentHead: true
-  },
   EXAM_CONTROLLER: {
     key: "EXAM_CONTROLLER",
     label: "Exam Controller",
     category: "ACADEMICS",
-    roleCode: RoleCode.TEACHER,
+    roleCode: RoleCode.EXAM_CONTROLLER,
     linkedProfileType: "staff",
     designation: "Exam Controller"
   },
@@ -131,7 +157,7 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     key: "PROCUREMENT_MANAGER",
     label: "Procurement Manager",
     category: "FINANCE",
-    roleCode: RoleCode.ACCOUNTANT,
+    roleCode: RoleCode.PROCUREMENT_MANAGER,
     linkedProfileType: "staff",
     designation: "Procurement Manager",
     marksDepartmentHead: true
@@ -140,7 +166,7 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     key: "LIBRARIAN",
     label: "Librarian",
     category: "OPERATIONS",
-    roleCode: RoleCode.ADMIN,
+    roleCode: RoleCode.LIBRARIAN,
     linkedProfileType: "staff",
     designation: "Librarian"
   },
@@ -148,7 +174,7 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     key: "TRANSPORT_MANAGER",
     label: "Transport Manager",
     category: "OPERATIONS",
-    roleCode: RoleCode.ADMIN,
+    roleCode: RoleCode.TRANSPORT_MANAGER,
     linkedProfileType: "staff",
     designation: "Transport Manager",
     marksDepartmentHead: true
@@ -157,7 +183,7 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     key: "HOSTEL_WARDEN",
     label: "Hostel Warden",
     category: "OPERATIONS",
-    roleCode: RoleCode.ADMIN,
+    roleCode: RoleCode.HOSTEL_WARDEN,
     linkedProfileType: "staff",
     designation: "Hostel Warden",
     marksDepartmentHead: true
@@ -166,41 +192,41 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
     key: "FRONT_DESK",
     label: "Front Desk",
     category: "OPERATIONS",
-    roleCode: RoleCode.ADMIN,
+    roleCode: RoleCode.FRONT_DESK,
     linkedProfileType: "staff",
     designation: "Front Desk"
-  },
-  SECURITY_GUARD: {
-    key: "SECURITY_GUARD",
-    label: "Security Guard",
-    category: "SUPPORT_STAFF",
-    roleCode: RoleCode.ADMIN,
-    linkedProfileType: "staff",
-    designation: "Security Guard"
-  },
-  PEON: {
-    key: "PEON",
-    label: "Peon",
-    category: "SUPPORT_STAFF",
-    roleCode: RoleCode.ADMIN,
-    linkedProfileType: "staff",
-    designation: "Peon"
-  },
-  MAINTENANCE_TECHNICIAN: {
-    key: "MAINTENANCE_TECHNICIAN",
-    label: "Maintenance Technician",
-    category: "SUPPORT_STAFF",
-    roleCode: RoleCode.ADMIN,
-    linkedProfileType: "staff",
-    designation: "Maintenance Technician"
   },
   NURSE: {
     key: "NURSE",
     label: "Nurse",
     category: "SUPPORT_STAFF",
-    roleCode: RoleCode.ADMIN,
+    roleCode: RoleCode.NURSE,
     linkedProfileType: "staff",
     designation: "Nurse"
+  },
+  SECURITY_GUARD: {
+    key: "SECURITY_GUARD",
+    label: "Security Guard",
+    category: "SUPPORT_STAFF",
+    roleCode: RoleCode.SECURITY_GUARD,
+    linkedProfileType: "staff",
+    designation: "Security Guard"
+  },
+  MAINTENANCE_TECHNICIAN: {
+    key: "MAINTENANCE_TECHNICIAN",
+    label: "Maintenance Technician",
+    category: "SUPPORT_STAFF",
+    roleCode: RoleCode.MAINTENANCE_TECHNICIAN,
+    linkedProfileType: "staff",
+    designation: "Maintenance Technician"
+  },
+  PEON: {
+    key: "PEON",
+    label: "Peon",
+    category: "SUPPORT_STAFF",
+    roleCode: RoleCode.PEON,
+    linkedProfileType: "staff",
+    designation: "Peon"
   },
   STUDENT: {
     key: "STUDENT",
@@ -219,45 +245,17 @@ export const SPECIFIC_ROLE_DEFINITIONS: Record<SpecificRoleKey, SpecificRoleDefi
 };
 
 export const SPECIFIC_ROLES_BY_CATEGORY: Record<RoleCategory, SpecificRoleKey[]> = {
-  MANAGEMENT: ["SUPER_ADMIN", "ADMIN", "PRINCIPAL", "DIRECTOR"],
-  ACADEMICS: ["TEACHER", "HOD", "EXAM_CONTROLLER"],
+  MANAGEMENT: ["SUPER_ADMIN", "ADMIN", "DIRECTOR", "PRINCIPAL", "HR"],
+  ACADEMICS: ["HOD", "TEACHER", "EXAM_CONTROLLER"],
   FINANCE: ["ACCOUNTANT", "PROCUREMENT_MANAGER"],
   OPERATIONS: ["LIBRARIAN", "TRANSPORT_MANAGER", "HOSTEL_WARDEN", "FRONT_DESK"],
-  SUPPORT_STAFF: ["SECURITY_GUARD", "PEON", "MAINTENANCE_TECHNICIAN", "NURSE"],
+  SUPPORT_STAFF: ["NURSE", "SECURITY_GUARD", "MAINTENANCE_TECHNICIAN", "PEON"],
   PRIMARY_USERS: ["STUDENT", "PARENT"]
 };
 
-export const ROLE_CODES = [
-  "SUPER_ADMIN",
-  "ADMIN",
-  "PRINCIPAL",
-  "TEACHER",
-  "ACCOUNTANT",
-  "STUDENT",
-  "PARENT"
-] as const satisfies readonly RoleCode[];
+export const ROLE_CODES = RBAC_ROLE_CODES;
 
-export const ROLE_LABELS: Record<RoleCode, string> = {
-  SUPER_ADMIN: "Super Admin",
-  ADMIN: "Admin",
-  PRINCIPAL: "Principal",
-  TEACHER: "Teacher",
-  ACCOUNTANT: "Accountant",
-  STUDENT: "Student",
-  PARENT: "Parent"
-};
-
-export function roleCodeToUserType(roleCode: RoleCode) {
-  if (roleCode === RoleCode.STUDENT) {
-    return UserType.STUDENT;
-  }
-
-  if (roleCode === RoleCode.PARENT) {
-    return UserType.PARENT;
-  }
-
-  return UserType.STAFF;
-}
+export { ROLE_LABELS, roleCodeToUserType };
 
 export function departmentForRoleCategory(roleCategory: RoleCategory) {
   const mapping: Record<RoleCategory, string> = {
@@ -293,8 +291,10 @@ export function getSpecificRoleDefinition(roleKey: string | null | undefined) {
   return SPECIFIC_ROLE_DEFINITIONS[roleKey as SpecificRoleKey];
 }
 
-export function getSpecificRoleOptions(category: RoleCategory) {
-  return SPECIFIC_ROLES_BY_CATEGORY[category].map((key) => SPECIFIC_ROLE_DEFINITIONS[key]);
+export function getSpecificRoleOptions(category: RoleCategory, allowedRoleKeys?: readonly SpecificRoleKey[]) {
+  return SPECIFIC_ROLES_BY_CATEGORY[category]
+    .filter((key) => !allowedRoleKeys || allowedRoleKeys.includes(key))
+    .map((key) => SPECIFIC_ROLE_DEFINITIONS[key]);
 }
 
 export function getSpecificRoleLabel(roleKey: string | null | undefined, fallbackRoleCode?: RoleCode | null) {
@@ -310,55 +310,85 @@ export function getSpecificRoleLabel(roleKey: string | null | undefined, fallbac
   return "Unknown role";
 }
 
+export function getRoleCategoryFromRoleCode(roleCode: RoleCode) {
+  const roleGroup = ROLE_GROUP_BY_CODE[roleCode];
+  switch (roleGroup) {
+    case "management":
+      return "MANAGEMENT";
+    case "academics":
+      return "ACADEMICS";
+    case "finance":
+      return "FINANCE";
+    case "operations":
+      return "OPERATIONS";
+    case "support":
+      return "SUPPORT_STAFF";
+    default:
+      return "PRIMARY_USERS";
+  }
+}
+
 export function inferSpecificRoleKey(
   roleCode: RoleCode,
   designation?: string | null,
   userName?: string | null
 ): SpecificRoleKey {
   const normalizedDesignation = (designation ?? "").trim().toLowerCase();
+  const normalizedName = (userName ?? "").trim().toLowerCase();
 
-  const byDesignation = Object.values(SPECIFIC_ROLE_DEFINITIONS).find(
+  const exactDesignationMatch = Object.values(SPECIFIC_ROLE_DEFINITIONS).find(
     (definition) =>
-      definition.roleCode === roleCode &&
-      definition.designation &&
-      definition.designation.trim().toLowerCase() === normalizedDesignation
+      definition.designation && definition.designation.trim().toLowerCase() === normalizedDesignation
   );
-
-  if (byDesignation) {
-    return byDesignation.key;
+  if (exactDesignationMatch) {
+    return exactDesignationMatch.key;
   }
 
-  const byLabel = Object.values(SPECIFIC_ROLE_DEFINITIONS).find(
-    (definition) => definition.roleCode === roleCode && definition.label.trim().toLowerCase() === normalizedDesignation
+  const exactLabelMatch = Object.values(SPECIFIC_ROLE_DEFINITIONS).find(
+    (definition) => definition.label.trim().toLowerCase() === normalizedDesignation
   );
-
-  if (byLabel) {
-    return byLabel.key;
+  if (exactLabelMatch) {
+    return exactLabelMatch.key;
   }
 
-  if (roleCode === RoleCode.PARENT) {
-    return "PARENT";
+  const directCodeMatch = Object.values(SPECIFIC_ROLE_DEFINITIONS).find(
+    (definition) => definition.roleCode === roleCode
+  );
+  if (directCodeMatch) {
+    return directCodeMatch.key;
   }
 
-  if (roleCode === RoleCode.STUDENT) {
-    return "STUDENT";
+  if (normalizedName.includes("director")) {
+    return "DIRECTOR";
   }
 
-  if (roleCode === RoleCode.ACCOUNTANT) {
-    return "ACCOUNTANT";
+  switch (roleCode) {
+    case RoleCode.PARENT:
+      return "PARENT";
+    case RoleCode.STUDENT:
+      return "STUDENT";
+    case RoleCode.ACCOUNTANT:
+      return "ACCOUNTANT";
+    case RoleCode.TEACHER:
+      return "TEACHER";
+    case RoleCode.PRINCIPAL:
+      return "PRINCIPAL";
+    case RoleCode.SUPER_ADMIN:
+      return "SUPER_ADMIN";
+    default:
+      return "ADMIN";
   }
+}
 
-  if (roleCode === RoleCode.TEACHER) {
-    return "TEACHER";
-  }
+export function getAssignableSpecificRoleKeys(sessionRoles: string[]) {
+  const allowedRoleCodes = getAssignableRoleCodes(sessionRoles);
+  return SPECIFIC_ROLE_KEYS.filter((roleKey) =>
+    allowedRoleCodes.includes(SPECIFIC_ROLE_DEFINITIONS[roleKey].roleCode)
+  );
+}
 
-  if (roleCode === RoleCode.PRINCIPAL) {
-    return normalizedDesignation === "director" || (userName ?? "").toLowerCase().includes("director")
-      ? "DIRECTOR"
-      : "PRINCIPAL";
-  }
-
-  return roleCode === RoleCode.SUPER_ADMIN ? "SUPER_ADMIN" : "ADMIN";
+export function canAssignSpecificRole(sessionRoles: string[], targetRoleKey: SpecificRoleKey) {
+  return canAssignRole(sessionRoles, SPECIFIC_ROLE_DEFINITIONS[targetRoleKey].roleCode);
 }
 
 export const userAccountSchema = z

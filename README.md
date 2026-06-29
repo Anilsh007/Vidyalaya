@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Vidyalaya Self-Hosted Setup
 
 Vidyalaya is designed to run on the school's own computer or server. It does not require paid hosting. A school can use it on one office PC, on a small local server, or across the school LAN.
@@ -80,6 +79,26 @@ Example for LAN use:
 APP_URL="http://192.168.1.50:3000"
 ```
 
+Example for LAN hostname use:
+
+```env
+APP_URL="http://school-server:3000"
+```
+
+Optional HTTPS deployment:
+
+```env
+APP_URL="https://your-school-domain-or-hostname"
+```
+
+Session cookie behavior depends on the `APP_URL` protocol:
+
+- if `APP_URL` starts with `http://`, session cookie `Secure=false`
+- if `APP_URL` starts with `https://`, session cookie `Secure=true`
+- `NODE_ENV=production` is valid for optimized local/LAN builds and does not force secure cookies by itself
+
+This matters because Vidyalaya is a downloadable local/LAN ERP, not only a public hosted SaaS app.
+
 Do not share `.env` with staff. It contains private configuration values.
 
 ## Step 2: Start the ERP with Docker
@@ -97,7 +116,7 @@ What this does:
 - starts the ERP service
 - runs database migrations on app startup by default
 
-## Step 3: Seed the first demo/admin data
+## Step 3: Seed the bootstrap system data
 
 Run this once:
 
@@ -110,12 +129,13 @@ This creates:
 - the default school
 - the current academic year
 - roles and permissions
-- demo users
-- sample class, section, student, fee, attendance, and notice data
+- role-permission mappings
+- one bootstrap administrator account
 
 Important:
 
-- if the ERP is being prepared for real school use, change the admin password immediately after first sign-in
+- this seed does not create fake students, staff, fees, attendance, exams, or other business records
+- if the ERP is being prepared for real school use, change the bootstrap administrator password immediately after first sign-in
 
 ## Step 4: Open the ERP
 
@@ -127,32 +147,34 @@ http://localhost:3000
 
 If `APP_URL` is set to the server IP, open that address instead.
 
-## Demo login credentials
+Cookie notes for local/LAN installs:
+
+- `HttpOnly=true`
+- `SameSite=Lax`
+- `Path=/`
+- `Secure=false` on plain HTTP installs like `localhost`, LAN IPs, or server hostnames
+- `Secure=true` only when `APP_URL` uses HTTPS
+
+## Bootstrap login credentials
 
 These are available after the seed command runs.
 
-Default demo password:
+Default bootstrap password:
 
 ```text
-123456789
+ChangeMe123!
 ```
 
-Admin can be overridden with:
+Bootstrap account values can be overridden with:
 
 - `DEFAULT_ADMIN_EMAIL`
 - `DEFAULT_ADMIN_PASSWORD`
 
-Demo accounts:
+Bootstrap account:
 
 | Role | Email |
 | --- | --- |
-| Super Admin | `superadmin@school.local` |
-| Admin | `admin@school.local` |
-| Principal | `principal@school.local` |
-| Teacher | `teacher@school.local` |
-| Accountant | `accountant@school.local` |
-| Parent | `parent@school.local` |
-| Student | `student@school.local` |
+| Super Admin | `admin@school.local` |
 
 ## Simple day-to-day commands
 
@@ -304,6 +326,12 @@ Example:
 APP_URL="http://192.168.1.50:3000"
 ```
 
+Hostname example:
+
+```env
+APP_URL="http://school-server:3000"
+```
+
 Staff can then use:
 
 ```text
@@ -315,6 +343,7 @@ Best practice:
 - use a fixed local IP for the school server
 - keep the server on a UPS if power cuts are common
 - prefer wired network for the server machine
+- if the school uses plain HTTP on LAN, session cookies still work because Secure is disabled automatically for HTTP `APP_URL`
 
 ## Optional Cloudflare Tunnel guide
 
@@ -403,6 +432,7 @@ Check:
 - seed command was run
 - correct admin email/password in `.env`
 - browser is using the correct URL
+- if the app is on plain HTTP LAN or localhost, confirm `APP_URL` also uses `http://` and not `https://`
 
 ### Other devices on the LAN cannot connect
 
@@ -432,10 +462,11 @@ Check:
 ## Security notes
 
 - Do not share `.env`
-- Change demo passwords before real school use
+- Change bootstrap credentials before real school use
 - Keep backups in a protected place
 - Use Cloudflare Tunnel or HTTPS proxy if remote access is needed
 - Do not expose the PostgreSQL port to the public internet
+- On HTTP localhost/LAN installs, cookies remain `HttpOnly` and `SameSite=Lax`, but `Secure` is intentionally disabled so sessions can persist without HTTPS
 
 ## Final recommendation for a school
 
@@ -446,6 +477,3 @@ For a real school office:
 3. Back up daily
 4. Change admin credentials before launch
 5. Add Cloudflare Tunnel only if remote access is really needed
-=======
-# Vidyalaya
->>>>>>> 5024f584b6f1f58de65e655a096589f081067aaa

@@ -11,17 +11,19 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import {
   getAttendanceReport,
   getExamResultReport,
   getFeeCollectionReport,
+  getReportsPageMeta,
   getPendingDuesReport,
   getStudentReport
-} from "@/lib/report-queries";
+} from "@/lib/services/reports.service";
 import { toPlainShareText } from "@/lib/reports";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/utils";
+import { reportsFilterSchema } from "@/lib/validations/reports";
+import { recordAuditLog } from "@/lib/audit";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -45,30 +47,24 @@ export default async function ReportsPage({
   const examId = asSingle(params.examId) ?? "";
   const startDate = asSingle(params.startDate) ?? "";
   const endDate = asSingle(params.endDate) ?? "";
+  const parsedFilters = reportsFilterSchema.safeParse({
+    classId,
+    sectionId,
+    examId,
+    startDate,
+    endDate
+  });
+  const safeFilters = parsedFilters.success ? parsedFilters.data : {};
 
-  const [classes, sections, exams] = await Promise.all([
-    db.schoolClass.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }]
-    }),
-    db.section.findMany({
-      where: { schoolId: session.schoolId },
-      include: { class: true },
-      orderBy: [{ class: { displayOrder: "asc" } }, { name: "asc" }]
-    }),
-    db.exam.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ startDate: "desc" }]
-    })
-  ]);
+  const { classes, sections, exams } = await getReportsPageMeta(session.schoolId);
 
   const filters = {
     schoolId: session.schoolId,
-    classId: classId || undefined,
-    sectionId: sectionId || undefined,
-    examId: examId || undefined,
-    startDate: startDate ? new Date(`${startDate}T00:00:00.000Z`) : undefined,
-    endDate: endDate ? new Date(`${endDate}T23:59:59.999Z`) : undefined
+    classId: safeFilters.classId || undefined,
+    sectionId: safeFilters.sectionId || undefined,
+    examId: safeFilters.examId || undefined,
+    startDate: safeFilters.startDate ? new Date(`${safeFilters.startDate}T00:00:00.000Z`) : undefined,
+    endDate: safeFilters.endDate ? new Date(`${safeFilters.endDate}T23:59:59.999Z`) : undefined
   };
 
   const [studentRows, attendanceRows, feeRows, duesRows, resultRows] = await Promise.all([
@@ -78,6 +74,20 @@ export default async function ReportsPage({
     getPendingDuesReport(filters),
     getExamResultReport(filters)
   ]);
+
+  await recordAuditLog({
+    actorUserId: session.userId,
+    schoolId: session.schoolId,
+    action: "report.viewed",
+    entityType: "Report",
+    metadata: {
+      classId: filters.classId ?? null,
+      sectionId: filters.sectionId ?? null,
+      examId: filters.examId ?? null,
+      startDate: safeFilters.startDate ?? null,
+      endDate: safeFilters.endDate ?? null
+    }
+  });
 
   const exportParams = new URLSearchParams();
   if (classId) exportParams.set("classId", classId);

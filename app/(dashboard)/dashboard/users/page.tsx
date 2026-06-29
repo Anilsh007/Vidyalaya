@@ -5,8 +5,10 @@ import { PageHeader } from "@/components/shared/page-header";
 import { requirePermission } from "@/lib/auth/access";
 import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
+import { hasRole } from "@/lib/rbac/guards";
 import {
   SPECIFIC_ROLE_DEFINITIONS,
+  getAssignableSpecificRoleKeys,
   getSpecificRoleLabel,
   inferSpecificRoleKey,
   type RoleCategory
@@ -25,6 +27,7 @@ type Option = {
 export default async function UsersPage({ searchParams }: { searchParams: SearchParams }) {
   void searchParams;
   const session = await requirePermission(PERMISSIONS.manageUsers);
+  const allowedSpecificRoleKeys = getAssignableSpecificRoleKeys(session.roles);
 
   const [users, allStaff, allParents, students, hodList] = await Promise.all([
     db.user.findMany({
@@ -197,7 +200,8 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
 
       <UserControlConsole
         users={userRows}
-        isSuperAdmin={session.roles.includes("SUPER_ADMIN")}
+        isSuperAdmin={hasRole(session, RoleCode.SUPER_ADMIN)}
+        allowedSpecificRoleKeys={allowedSpecificRoleKeys}
         createValues={{
           fullName: "",
           email: "",

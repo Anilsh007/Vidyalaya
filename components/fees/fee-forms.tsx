@@ -1,6 +1,5 @@
 "use client";
 
-import { FeePaymentMode } from "@prisma/client";
 import { useActionState } from "react";
 
 import {
@@ -16,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
-import { availablePaymentModes } from "@/lib/fees";
+import { FEE_PAYMENT_MODES, FEE_PAYMENT_MODE_OPTIONS } from "@/lib/constants/client-enums";
 import { initialActionFormState } from "@/lib/forms";
 
 type FeeHeadOption = {
@@ -285,9 +284,9 @@ export function FeePaymentForm({
             <Select
               id={`paymentMode-${feeInvoiceId}`}
               name="paymentMode"
-              defaultValue={FeePaymentMode.CASH}
+              defaultValue={FEE_PAYMENT_MODES.CASH}
             >
-              {availablePaymentModes().map((mode) => (
+              {FEE_PAYMENT_MODE_OPTIONS.map((mode) => (
                 <option key={mode} value={mode}>
                   {mode.replaceAll("_", " ")}
                 </option>

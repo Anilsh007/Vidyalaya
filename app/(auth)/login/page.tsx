@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { LoginForm } from "@/app/(auth)/login/login-form";
 import { getOptionalSession } from "@/lib/auth/session";
 import { APP_NAME, APP_TAGLINE } from "@/lib/copy";
+import { getDefaultDashboardRoute } from "@/lib/modules/module-access";
 
 type LoginPageProps = {
   searchParams: Promise<{
@@ -13,7 +14,8 @@ type LoginPageProps = {
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const session = await getOptionalSession();
   if (session) {
-    redirect("/dashboard");
+    const destination = getDefaultDashboardRoute(session);
+    redirect(destination === "/forbidden" ? "/forbidden" : destination);
   }
 
   const { next } = await searchParams;
@@ -34,4 +36,3 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     </main>
   );
 }
-

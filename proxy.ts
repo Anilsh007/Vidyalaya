@@ -1,35 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-const encoder = new TextEncoder();
-
-function base64UrlToUint8Array(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return bytes;
-}
-
-function base64UrlToJson<T>(value: string) {
-  const bytes = base64UrlToUint8Array(value);
-  return JSON.parse(new TextDecoder().decode(bytes)) as T;
-}
-
-async function importSessionKey(secret: string) {
-  return crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["verify"]
-  );
-}
+import { SESSION_PATH_HEADER, verifySignedSessionCookieValue } from "@/lib/auth/security";
+import type { AppSession } from "@/lib/auth/session";
 
 async function isValidSession(request: NextRequest) {
   const cookieName = process.env.SESSION_COOKIE_NAME ?? "school_erp_session";
@@ -44,32 +17,12 @@ async function isValidSession(request: NextRequest) {
     return false;
   }
 
-  const [payload, signature] = raw.split(".");
-  if (!payload || !signature) {
-    return false;
-  }
-
-  const key = await importSessionKey(secret);
-  const isValid = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    base64UrlToUint8Array(signature),
-    encoder.encode(payload)
-  );
-
-  if (!isValid) {
-    return false;
-  }
-
-  const session = base64UrlToJson<{
-    expiresAt?: number;
-  }>(payload);
-
-  return Boolean(session.expiresAt && Date.now() < session.expiresAt);
+  const session = await verifySignedSessionCookieValue<AppSession>(raw, secret);
+  return Boolean(session);
 }
 
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
 
   if (!pathname.startsWith("/dashboard")) {
     return NextResponse.next();
@@ -78,11 +31,17 @@ export async function proxy(request: NextRequest) {
   const authenticated = await isValidSession(request);
 
   if (authenticated) {
-    return NextResponse.next();
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set(SESSION_PATH_HEADER, pathname);
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders
+      }
+    });
   }
 
   const loginUrl = new URL("/login", request.url);
-  loginUrl.searchParams.set("next", pathname);
+  loginUrl.searchParams.set("next", `${pathname}${search}`);
   return NextResponse.redirect(loginUrl);
 }
 

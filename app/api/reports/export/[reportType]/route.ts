@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
 
+import { recordAuditLog } from "@/lib/audit";
+import { recordSecurityAuditEvent } from "@/lib/audit/audit.service";
 import { getOptionalSession } from "@/lib/auth/session";
-import { PERMISSIONS } from "@/lib/permissions";
-import {
-  getAttendanceReport,
-  getExamResultReport,
-  getFeeCollectionReport,
-  getPendingDuesReport,
-  getStudentReport
-} from "@/lib/report-queries";
+import { hasPermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import { rowsToCsv } from "@/lib/reports";
+import { getReportRows } from "@/lib/services/reports.service";
+import { reportTypeSchema } from "@/lib/validations/reports";
 
 type Params = Promise<{ reportType: string }>;
 
@@ -18,11 +16,24 @@ export async function GET(request: Request, { params }: { params: Params }) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!session.permissions.includes(PERMISSIONS.viewReports)) {
+  if (!hasPermission(session, RBAC_PERMISSIONS.reportsExport)) {
+    await recordSecurityAuditEvent({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: "auth.api.forbidden",
+      entityType: "Route",
+      entityId: "api.reports.export",
+      metadata: { url: request.url }
+    });
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { reportType } = await params;
+  const { reportType: rawReportType } = await params;
+  const parsedType = reportTypeSchema.safeParse(rawReportType);
+  if (!parsedType.success) {
+    return NextResponse.json({ error: "Unknown report type" }, { status: 404 });
+  }
+
   const url = new URL(request.url);
   const classId = url.searchParams.get("classId") || undefined;
   const sectionId = url.searchParams.get("sectionId") || undefined;
@@ -34,37 +45,36 @@ export async function GET(request: Request, { params }: { params: Params }) {
     ? new Date(`${url.searchParams.get("endDate")}T23:59:59.999Z`)
     : undefined;
 
-  const filters = {
+  const rows = await getReportRows(parsedType.data, {
     schoolId: session.schoolId,
     classId,
     sectionId,
     examId,
     startDate,
     endDate
-  };
+  });
 
-  const rows =
-    reportType === "student"
-      ? await getStudentReport(filters)
-      : reportType === "attendance"
-        ? await getAttendanceReport(filters)
-        : reportType === "fees"
-          ? await getFeeCollectionReport(filters)
-          : reportType === "dues"
-            ? await getPendingDuesReport(filters)
-            : reportType === "results"
-              ? await getExamResultReport(filters)
-              : null;
-
-  if (!rows) {
-    return NextResponse.json({ error: "Unknown report type" }, { status: 404 });
-  }
+  await recordAuditLog({
+    actorUserId: session.userId,
+    schoolId: session.schoolId,
+    action: "report.exported",
+    entityType: "Report",
+    metadata: {
+      reportType: parsedType.data,
+      classId: classId ?? null,
+      sectionId: sectionId ?? null,
+      examId: examId ?? null,
+      startDate: startDate?.toISOString() ?? null,
+      endDate: endDate?.toISOString() ?? null,
+      rowCount: rows.length
+    }
+  });
 
   const csv = rowsToCsv(rows);
   return new NextResponse(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${reportType}-report.csv"`
+      "Content-Disposition": `attachment; filename="${parsedType.data}-report.csv"`
     }
   });
 }

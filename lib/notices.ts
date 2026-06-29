@@ -1,6 +1,8 @@
 import { NoticeAudienceType } from "@prisma/client";
 import { z } from "zod";
 
+import { isStaffRole } from "@/lib/rbac/roles";
+
 export const noticeSchema = z.object({
   id: z.string().optional(),
   title: z.string().trim().min(2, "Notice title is required."),
@@ -18,8 +20,16 @@ export function isNoticeVisibleToSession(
     audienceType: NoticeAudienceType;
     roleCode?: string | null;
     isPublished: boolean;
+    classId?: string | null;
+    sectionId?: string | null;
   },
-  sessionRoles: string[]
+  sessionRoles: string[],
+  scope?: {
+    classIds?: string[];
+    sectionIds?: string[];
+    includeStudents?: boolean;
+    includeParents?: boolean;
+  }
 ) {
   if (!notice.isPublished) {
     return false;
@@ -34,9 +44,23 @@ export function isNoticeVisibleToSession(
   }
 
   if (notice.audienceType === NoticeAudienceType.STAFF) {
-    return sessionRoles.some((role) =>
-      ["SUPER_ADMIN", "ADMIN", "PRINCIPAL", "TEACHER", "ACCOUNTANT"].includes(role)
-    );
+    return sessionRoles.some((role) => isStaffRole(role));
+  }
+
+  if (notice.audienceType === NoticeAudienceType.STUDENTS) {
+    return scope?.includeStudents ?? false;
+  }
+
+  if (notice.audienceType === NoticeAudienceType.PARENTS) {
+    return scope?.includeParents ?? false;
+  }
+
+  if (notice.audienceType === NoticeAudienceType.CLASS) {
+    return notice.classId ? (scope?.classIds ?? []).includes(notice.classId) : false;
+  }
+
+  if (notice.audienceType === NoticeAudienceType.SECTION) {
+    return notice.sectionId ? (scope?.sectionIds ?? []).includes(notice.sectionId) : false;
   }
 
   return false;

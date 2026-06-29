@@ -14,7 +14,7 @@ type ToastItem = {
 };
 
 type ToastContextValue = {
-  pushToast: (input: Omit<ToastItem, "id">) => void;
+  pushToast: (input: ToastItem) => void;
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -67,7 +67,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         newestOnTop
         theme="light"
         transition={Bounce}
-        containerStyle={{ zIndex: 100 }}
+        style={{ zIndex: 9999 }}
         toastClassName={() => "rounded-2xl shadow-panel backdrop-blur"}
       />
     </ToastContext.Provider>

@@ -14,14 +14,11 @@ import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import {
   attendanceLabel,
-  getMonthBounds,
-  toDateInput,
-  toDayBounds,
-  toMonthInput
+  toDateInput
 } from "@/lib/attendance";
-import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
-import { PERMISSIONS } from "@/lib/permissions";
+import { requireAnyPermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { getAttendancePageData } from "@/lib/services/attendance.service";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -34,26 +31,34 @@ export default async function AttendancePage({
 }: {
   searchParams: SearchParams;
 }) {
-  const session = await requirePermission(PERMISSIONS.viewAttendance);
+  const session = await requireAnyPermission([
+    RBAC_PERMISSIONS.attendanceRead,
+    RBAC_PERMISSIONS.attendanceReadClass,
+    RBAC_PERMISSIONS.attendanceReadOwn,
+    RBAC_PERMISSIONS.attendanceReadChild
+  ]);
   const params = await searchParams;
 
-  const classes = await db.schoolClass.findMany({
-    where: { schoolId: session.schoolId },
-    orderBy: [{ displayOrder: "asc" }, { name: "asc" }]
-  });
-
-  const classId = asSingle(params.classId) ?? classes[0]?.id ?? "";
-  const sections = await db.section.findMany({
-    where: {
-      schoolId: session.schoolId,
-      ...(classId ? { classId } : {})
-    },
-    orderBy: { name: "asc" }
-  });
-
-  const sectionId = asSingle(params.sectionId) ?? sections[0]?.id ?? "";
+  const classId = asSingle(params.classId) ?? "";
+  const sectionId = asSingle(params.sectionId) ?? "";
   const date = asSingle(params.date) ?? toDateInput();
-  const month = asSingle(params.month) ?? toMonthInput();
+  const month = asSingle(params.month) ?? "";
+  const {
+    classes,
+    sections,
+    selectedClass,
+    selectedSection,
+    students,
+    dayAttendances,
+    monthlyAttendances
+  } = await getAttendancePageData({
+    schoolId: session.schoolId,
+    viewer: session,
+    classId,
+    sectionId,
+    date,
+    month
+  });
 
   if (!classes.length) {
     return (
@@ -75,50 +80,6 @@ export default async function AttendancePage({
       </div>
     );
   }
-
-  const selectedClass = classes.find((item) => item.id === classId) ?? classes[0];
-  const selectedSection = sections.find((item) => item.id === sectionId) ?? sections[0];
-
-  const students = selectedSection
-    ? await db.student.findMany({
-        where: {
-          schoolId: session.schoolId,
-          classId: selectedClass.id,
-          sectionId: selectedSection.id,
-          status: { not: "ARCHIVED" }
-        },
-        orderBy: [{ rollNumber: "asc" }, { fullName: "asc" }]
-      })
-    : [];
-
-  const dayBounds = toDayBounds(date);
-  const monthBounds = getMonthBounds(month);
-  const dayAttendances = students.length
-    ? await db.attendance.findMany({
-        where: {
-          schoolId: session.schoolId,
-          studentId: { in: students.map((student) => student.id) },
-          date: {
-            gte: dayBounds.start,
-            lte: dayBounds.end
-          }
-        }
-      })
-    : [];
-
-  const monthlyAttendances = students.length
-    ? await db.attendance.findMany({
-        where: {
-          schoolId: session.schoolId,
-          studentId: { in: students.map((student) => student.id) },
-          date: {
-            gte: monthBounds.start,
-            lte: monthBounds.end
-          }
-        },
-        orderBy: [{ date: "asc" }]
-      })
-    : [];
 
   const attendanceMap = new Map(dayAttendances.map((item) => [item.studentId, item]));
   const studentRows = students.map((student) => ({

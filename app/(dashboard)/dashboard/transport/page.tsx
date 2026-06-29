@@ -15,8 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
+import { getTransportPageData } from "@/lib/services/transport.service";
 import { formatCurrency } from "@/lib/utils";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
@@ -24,52 +24,17 @@ export default async function TransportPage() {
   const session = await requirePermission(PERMISSIONS.viewTransport);
   const canManageTransport = session.permissions.includes(PERMISSIONS.manageTransport);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "transport");
-  const today = new Date();
-
-  const [vehicles, routes, stops, assignments, students] = await Promise.all([
-    db.transportVehicle.findMany({
-      where: { schoolId: session.schoolId, isArchived: false },
-      include: { routes: true },
-      orderBy: [{ vehicleNumber: "asc" }]
-    }),
-    db.transportRoute.findMany({
-      where: { schoolId: session.schoolId, isArchived: false },
-      include: {
-        vehicle: true,
-        stops: { orderBy: [{ stopOrder: "asc" }, { name: "asc" }] },
-        assignments: { where: { status: "ACTIVE" } }
-      },
-      orderBy: [{ code: "asc" }]
-    }),
-    db.transportStop.findMany({
-      where: { schoolId: session.schoolId },
-      include: { route: true },
-      orderBy: [{ route: { code: "asc" } }, { stopOrder: "asc" }]
-    }),
-    db.transportAssignment.findMany({
-      where: { schoolId: session.schoolId },
-      include: { student: { include: { class: true, section: true } }, route: { include: { vehicle: true } }, stop: true },
-      orderBy: [{ createdAt: "desc" }],
-      take: 20
-    }),
-    db.student.findMany({
-      where: { schoolId: session.schoolId, status: { not: "ARCHIVED" } },
-      include: { class: true, section: true },
-      orderBy: [{ fullName: "asc" }]
-    })
-  ]);
-
-  const activeAssignments = assignments.filter((assignment) => assignment.status === "ACTIVE");
-  const totalCapacity = vehicles.filter((vehicle) => vehicle.isActive).reduce((sum, vehicle) => sum + vehicle.capacity, 0);
-  const expiringCompliance = vehicles.filter(
-    (vehicle) =>
-      (vehicle.insuranceValidUntil && vehicle.insuranceValidUntil < today) ||
-      (vehicle.fitnessValidUntil && vehicle.fitnessValidUntil < today)
-  ).length;
-  const monthlyTransportValue = activeAssignments.reduce(
-    (sum, assignment) => sum + (assignment.monthlyFee ? Number(assignment.monthlyFee) : Number(assignment.route.monthlyFee ?? 0)),
-    0
-  );
+  const {
+    vehicles,
+    routes,
+    stops,
+    assignments,
+    students,
+    activeAssignments,
+    totalCapacity,
+    expiringCompliance,
+    monthlyTransportValue
+  } = await getTransportPageData({ schoolId: session.schoolId });
 
   return (
     <div className="grid gap-6">

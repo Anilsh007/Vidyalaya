@@ -1,15 +1,16 @@
 "use server";
 
-import { Gender } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { PERMISSIONS } from "@/lib/permissions";
-import { getCurrentAcademicYear, staffSchema } from "@/lib/school";
+import { requireAnyPermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { getCurrentAcademicYear } from "@/lib/school";
+import { archiveStaffRecord, saveStaffRecord } from "@/lib/services/staff.service";
+import { staffSchema } from "@/lib/validations/staff";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -19,7 +20,12 @@ export async function saveStaffAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageStaff);
+  const isEditing = Boolean(getString(formData, "id"));
+  const session = await requireAnyPermission(
+    isEditing
+      ? [RBAC_PERMISSIONS.staffUpdate]
+      : [RBAC_PERMISSIONS.staffCreate, RBAC_PERMISSIONS.staffUpdate]
+  );
   const academicYear = await getCurrentAcademicYear(session.schoolId);
   if (!academicYear) {
     return { status: "error", message: "Set an academic year before creating staff records." };
@@ -48,51 +54,17 @@ export async function saveStaffAction(
     };
   }
 
-  const data = parsed.data;
-  const staffData = {
-    academicYearId: academicYear.id,
-    employeeCode: data.employeeCode,
-    fullName: data.fullName,
-    designation: data.designation,
-    department: data.department || null,
-    qualification: data.qualification || null,
-    joiningDate: new Date(`${data.joiningDate}T00:00:00.000Z`),
-    phone: data.phone || null,
-    email: data.email || null,
-    gender: data.gender ? (data.gender as Gender) : null,
-    salaryAmount:
-      data.salaryAmount === "" || data.salaryAmount === undefined ? null : Number(data.salaryAmount),
-    isTeachingStaff: data.isTeachingStaff === "yes"
-  };
-
   try {
-    const staff = data.id
-      ? await (async () => {
-          const existing = await db.staff.findFirst({
-            where: { id: data.id, schoolId: session.schoolId },
-            select: { id: true }
-          });
-
-          if (!existing) {
-            throw new Error("Staff record not found.");
-          }
-
-          return db.staff.update({
-            where: { id: data.id },
-            data: staffData
-          });
-        })()
-      : await db.staff.create({
-          data: {
-            schoolId: session.schoolId,
-            ...staffData
-          }
-        });
+    const staff = await saveStaffRecord({
+      schoolId: session.schoolId,
+      academicYearId: academicYear.id,
+      ...parsed.data
+    });
 
     await recordAuditLog({
       actorUserId: session.userId,
       schoolId: session.schoolId,
-      action: data.id ? "staff.updated" : "staff.created",
+      action: parsed.data.id ? "staff.updated" : "staff.created",
       entityType: "Staff",
       entityId: staff.id,
       metadata: {
@@ -113,28 +85,16 @@ export async function saveStaffAction(
 }
 
 export async function archiveStaffAction(formData: FormData) {
-  const session = await requirePermission(PERMISSIONS.manageStaff);
+  const session = await requirePermission(RBAC_PERMISSIONS.staffDelete);
   const staffId = getString(formData, "staffId");
   if (!staffId) {
     return;
   }
 
-  const staff = await db.staff.findFirst({
-    where: { id: staffId, schoolId: session.schoolId },
-    select: { id: true, fullName: true }
-  });
-
+  const staff = await archiveStaffRecord({ schoolId: session.schoolId, staffId });
   if (!staff) {
     return;
   }
-
-  await db.staff.update({
-    where: { id: staff.id },
-    data: {
-      isArchived: true,
-      archivedAt: new Date()
-    }
-  });
 
   await recordAuditLog({
     actorUserId: session.userId,
@@ -142,7 +102,7 @@ export async function archiveStaffAction(formData: FormData) {
     action: "staff.archived",
     entityType: "Staff",
     entityId: staff.id,
-    metadata: { fullName: staff.fullName }
+    metadata: { fullName: staff.fullName, employeeCode: staff.employeeCode }
   });
 
   revalidatePath("/dashboard/staff");

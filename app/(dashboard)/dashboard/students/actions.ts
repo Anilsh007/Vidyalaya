@@ -2,14 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { Gender } from "@prisma/client";
 
 import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { PERMISSIONS } from "@/lib/permissions";
-import { getCurrentAcademicYear, studentSchema } from "@/lib/school";
+import { requireAnyPermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { getCurrentAcademicYear } from "@/lib/school";
+import { archiveStudentRecord, saveStudentRecord } from "@/lib/services/students.service";
+import { studentSchema } from "@/lib/validations/students";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -20,26 +21,16 @@ function getOptionalString(formData: FormData, key: string) {
   return value || undefined;
 }
 
-function splitAddress(address?: string) {
-  const parts = (address ?? "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  return {
-    addressLine1: parts[0] ?? null,
-    addressLine2: parts[1] ?? null,
-    city: parts[2] ?? null,
-    state: parts[3] ?? null,
-    postalCode: parts[4] ?? null
-  };
-}
-
 export async function saveStudentAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageStudents);
+  const isEditing = Boolean(getOptionalString(formData, "id"));
+  const session = await requireAnyPermission(
+    isEditing
+      ? [RBAC_PERMISSIONS.studentsUpdate]
+      : [RBAC_PERMISSIONS.studentsCreate, RBAC_PERMISSIONS.studentsUpdate]
+  );
   const academicYear = await getCurrentAcademicYear(session.schoolId);
   if (!academicYear) {
     return {
@@ -81,119 +72,11 @@ export async function saveStudentAction(
     };
   }
 
-  const data = parsed.data;
-  const fullName = [data.firstName, data.lastName].filter(Boolean).join(" ");
-  const studentAddress = splitAddress(data.address);
-
   try {
-    const result = await db.$transaction(async (tx) => {
-      const parentData = {
-        schoolId: session.schoolId,
-        guardianName: data.guardianName,
-        relation: data.relation,
-        fatherName: data.fatherName || null,
-        motherName: data.motherName || null,
-        phonePrimary: data.guardianPhonePrimary,
-        phoneSecondary: data.guardianPhoneSecondary || null,
-        email: data.guardianEmail || null,
-        occupation: data.occupation || null,
-        ...studentAddress
-      };
-
-      let studentId = data.id;
-      let parentId: string;
-
-      if (studentId) {
-        const existingStudent = await tx.student.findFirst({
-          where: { id: studentId, schoolId: session.schoolId }
-        });
-
-        if (!existingStudent) {
-          throw new Error("Student not found.");
-        }
-
-        const existingLink = await tx.studentGuardian.findFirst({
-          where: {
-            studentId,
-            student: {
-              schoolId: session.schoolId
-            },
-            isPrimary: true
-          },
-          include: { parent: true }
-        });
-
-        const student = await tx.student.update({
-          where: { id: studentId },
-          data: {
-            academicYearId: academicYear.id,
-            firstName: data.firstName,
-            lastName: data.lastName || null,
-            fullName,
-            gender: data.gender ? (data.gender as Gender) : null,
-            dateOfBirth: data.dateOfBirth ? new Date(`${data.dateOfBirth}T00:00:00.000Z`) : null,
-            admissionDate: new Date(`${data.admissionDate}T00:00:00.000Z`),
-            admissionNumber: data.admissionNumber,
-            rollNumber: data.rollNumber || null,
-            status: data.status,
-            classId: data.classId || null,
-            sectionId: data.sectionId || null,
-            ...studentAddress
-          }
-        });
-
-        if (existingLink) {
-          await tx.parent.update({
-            where: { id: existingLink.parentId },
-            data: parentData
-          });
-          parentId = existingLink.parentId;
-        } else {
-          const parent = await tx.parent.create({ data: parentData });
-          parentId = parent.id;
-          await tx.studentGuardian.create({
-            data: {
-              studentId: student.id,
-              parentId,
-              isPrimary: true
-            }
-          });
-        }
-
-        return { studentId: student.id, parentId, created: false };
-      }
-
-      const parent = await tx.parent.create({ data: parentData });
-      parentId = parent.id;
-
-      const student = await tx.student.create({
-        data: {
-          schoolId: session.schoolId,
-          academicYearId: academicYear.id,
-          firstName: data.firstName,
-          lastName: data.lastName || null,
-          fullName,
-          gender: data.gender ? (data.gender as Gender) : null,
-          dateOfBirth: data.dateOfBirth ? new Date(`${data.dateOfBirth}T00:00:00.000Z`) : null,
-          admissionDate: new Date(`${data.admissionDate}T00:00:00.000Z`),
-          admissionNumber: data.admissionNumber,
-          rollNumber: data.rollNumber || null,
-          status: data.status,
-          classId: data.classId || null,
-          sectionId: data.sectionId || null,
-          ...studentAddress
-        }
-      });
-
-      await tx.studentGuardian.create({
-        data: {
-          studentId: student.id,
-          parentId,
-          isPrimary: true
-        }
-      });
-
-      return { studentId: student.id, parentId, created: true };
+    const result = await saveStudentRecord({
+      schoolId: session.schoolId,
+      academicYearId: academicYear.id,
+      ...parsed.data
     });
 
     await recordAuditLog({
@@ -203,10 +86,10 @@ export async function saveStudentAction(
       entityType: "Student",
       entityId: result.studentId,
       metadata: {
-        fullName,
-        admissionNumber: data.admissionNumber,
-        classId: data.classId || null,
-        sectionId: data.sectionId || null
+        fullName: result.fullName,
+        admissionNumber: result.admissionNumber,
+        classId: result.classId,
+        sectionId: result.sectionId
       }
     });
 
@@ -223,34 +106,29 @@ export async function saveStudentAction(
 }
 
 export async function archiveStudentAction(formData: FormData) {
-  const session = await requirePermission(PERMISSIONS.manageStudents);
+  const session = await requirePermission(RBAC_PERMISSIONS.studentsDelete);
   const studentId = getString(formData, "studentId");
   if (!studentId) {
     return;
   }
 
-  const student = await db.student.findFirst({
-    where: { id: studentId, schoolId: session.schoolId },
-    select: { id: true }
-  });
-
+  const student = await archiveStudentRecord({ schoolId: session.schoolId, studentId });
   if (!student) {
     return;
   }
-
-  await db.student.update({
-    where: { id: student.id },
-    data: { status: "ARCHIVED" }
-  });
 
   await recordAuditLog({
     actorUserId: session.userId,
     schoolId: session.schoolId,
     action: "student.archived",
     entityType: "Student",
-    entityId: studentId
+    entityId: student.id,
+    metadata: {
+      fullName: student.fullName,
+      admissionNumber: student.admissionNumber
+    }
   });
 
   revalidatePath("/dashboard/students");
-  revalidatePath(`/dashboard/students/${studentId}`);
+  revalidatePath(`/dashboard/students/${student.id}`);
 }

@@ -2,23 +2,23 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
+import { type ActionFormState, initialActionFormState } from "@/lib/forms";
+import { requireAnyPermission, requirePermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import {
-  computeInvoiceStatus,
+  collectFeePayment,
+  generateFeeInvoice,
+  saveFeeHead,
+  saveFeeStructure
+} from "@/lib/services/fees.service";
+import { getCurrentAcademicYear } from "@/lib/school";
+import {
   feeHeadSchema,
   feeInvoiceSchema,
   feePaymentSchema,
-  feeStructureSchema,
-  fromMoney,
-  nextInvoiceNumber,
-  nextReceiptNumber,
-  toMoney
-} from "@/lib/fees";
-import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { PERMISSIONS } from "@/lib/permissions";
-import { getCurrentAcademicYear } from "@/lib/school";
+  feeStructureSchema
+} from "@/lib/validations/fees";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -33,7 +33,7 @@ export async function saveFeeHeadAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageFees);
+  const session = await requirePermission(RBAC_PERMISSIONS.feesUpdate);
   const parsed = feeHeadSchema.safeParse({
     id: getOptionalString(formData, "id"),
     name: getString(formData, "name"),
@@ -50,69 +50,44 @@ export async function saveFeeHeadAction(
     };
   }
 
-  const data = parsed.data;
-  const existingHead = data.id
-    ? await db.feeHead.findFirst({
-        where: {
-          id: data.id,
-          schoolId: session.schoolId
-        }
-      })
-    : null;
+  try {
+    const result = await saveFeeHead({
+      schoolId: session.schoolId,
+      ...parsed.data
+    });
 
-  if (data.id && !existingHead) {
+    await recordAuditLog({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: parsed.data.id ? "fees.updated" : "fees.created",
+      entityType: "FeeHead",
+      entityId: result.id,
+      metadata: {
+        name: result.name,
+        code: result.code
+      }
+    });
+
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/fees");
+
+    return {
+      status: "success",
+      message: parsed.data.id ? "Fee head updated." : "Fee head created."
+    };
+  } catch (error) {
     return {
       status: "error",
-      message: "Fee head not found."
+      message: error instanceof Error ? error.message : "Unable to save fee head."
     };
   }
-
-  const result = data.id
-    ? await db.feeHead.update({
-        where: { id: data.id },
-        data: {
-          name: data.name,
-          code: data.code.toUpperCase(),
-          description: data.description || null,
-          isOptional: data.isOptional === "yes"
-        }
-      })
-    : await db.feeHead.create({
-        data: {
-          schoolId: session.schoolId,
-          name: data.name,
-          code: data.code.toUpperCase(),
-          description: data.description || null,
-          isOptional: data.isOptional === "yes"
-        }
-      });
-
-  await recordAuditLog({
-    actorUserId: session.userId,
-    schoolId: session.schoolId,
-    action: data.id ? "fee_head.updated" : "fee_head.created",
-    entityType: "FeeHead",
-    entityId: result.id,
-    metadata: {
-      name: data.name,
-      code: data.code.toUpperCase()
-    }
-  });
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/fees");
-
-  return {
-    status: "success",
-    message: data.id ? "Fee head updated." : "Fee head created."
-  };
 }
 
 export async function saveFeeStructureAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageFees);
+  const session = await requirePermission(RBAC_PERMISSIONS.feesUpdate);
   const parsed = feeStructureSchema.safeParse({
     id: getOptionalString(formData, "id"),
     classId: getOptionalString(formData, "classId"),
@@ -129,16 +104,11 @@ export async function saveFeeStructureAction(
     };
   }
 
-  const feeHeads = await db.feeHead.findMany({
-    where: { schoolId: session.schoolId },
-    orderBy: { name: "asc" }
-  });
-
-  const itemInputs = feeHeads
-    .map((head) => ({
-      feeHeadId: head.id,
-      label: head.name,
-      amount: Number(getString(formData, `amount_${head.id}`) || 0)
+  const itemInputs = Array.from(new Set(formData.keys()))
+    .filter((key) => key.startsWith("amount_"))
+    .map((key) => ({
+      feeHeadId: key.replace("amount_", ""),
+      amount: Number(getString(formData, key) || 0)
     }))
     .filter((item) => item.amount > 0);
 
@@ -149,75 +119,23 @@ export async function saveFeeStructureAction(
     };
   }
 
-  const data = parsed.data;
-
   try {
-    const structure = await db.$transaction(async (tx) => {
-      if (data.id) {
-        const existing = await tx.feeStructure.findFirst({
-          where: {
-            id: data.id,
-            schoolId: session.schoolId
-          }
-        });
-
-        if (!existing) {
-          throw new Error("Fee structure not found.");
-        }
-      }
-
-      const saved = data.id
-        ? await tx.feeStructure.update({
-            where: { id: data.id },
-            data: {
-              classId: data.classId || null,
-              name: data.name,
-              effectiveFrom: new Date(`${data.effectiveFrom}T00:00:00.000Z`),
-              effectiveTo: data.effectiveTo
-                ? new Date(`${data.effectiveTo}T23:59:59.999Z`)
-                : null
-            }
-          })
-        : await tx.feeStructure.create({
-            data: {
-              schoolId: session.schoolId,
-              classId: data.classId || null,
-              name: data.name,
-              effectiveFrom: new Date(`${data.effectiveFrom}T00:00:00.000Z`),
-              effectiveTo: data.effectiveTo
-                ? new Date(`${data.effectiveTo}T23:59:59.999Z`)
-                : null
-            }
-          });
-
-      await tx.feeStructureItem.deleteMany({
-        where: { feeStructureId: saved.id }
-      });
-
-      await tx.feeStructureItem.createMany({
-        data: itemInputs.map((item) => ({
-          feeStructureId: saved.id,
-          feeHeadId: item.feeHeadId,
-          amount: toMoney(item.amount)
-        }))
-      });
-
-      return saved;
+    const structure = await saveFeeStructure({
+      schoolId: session.schoolId,
+      ...parsed.data,
+      items: itemInputs
     });
 
     await recordAuditLog({
       actorUserId: session.userId,
       schoolId: session.schoolId,
-      action: data.id ? "fee_structure.updated" : "fee_structure.created",
+      action: parsed.data.id ? "fees.updated" : "fees.created",
       entityType: "FeeStructure",
       entityId: structure.id,
       metadata: {
-        classId: data.classId || null,
-        name: data.name,
-        heads: itemInputs.map((item) => ({
-          feeHeadId: item.feeHeadId,
-          amount: item.amount
-        }))
+        classId: parsed.data.classId || null,
+        name: parsed.data.name,
+        heads: itemInputs
       }
     });
 
@@ -226,7 +144,7 @@ export async function saveFeeStructureAction(
 
     return {
       status: "success",
-      message: data.id ? "Fee structure updated." : "Fee structure saved."
+      message: parsed.data.id ? "Fee structure updated." : "Fee structure saved."
     };
   } catch (error) {
     return {
@@ -240,7 +158,10 @@ export async function generateFeeInvoiceAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageFees);
+  const session = await requireAnyPermission([
+    RBAC_PERMISSIONS.feesUpdate,
+    RBAC_PERMISSIONS.feesCollect
+  ]);
   const academicYear = await getCurrentAcademicYear(session.schoolId);
 
   if (!academicYear) {
@@ -266,126 +187,50 @@ export async function generateFeeInvoiceAction(
     };
   }
 
-  const student = await db.student.findFirst({
-    where: {
-      id: parsed.data.studentId,
-      schoolId: session.schoolId
-    },
-    include: {
-      class: true,
-      section: true
-    }
-  });
-
-  if (!student) {
-    return {
-      status: "error",
-      message: "Student not found."
-    };
-  }
-
-  const structure =
-    (student.classId
-      ? await db.feeStructure.findFirst({
-          where: {
-            schoolId: session.schoolId,
-            classId: student.classId
-          },
-          include: {
-            items: {
-              include: { feeHead: true }
-            }
-          },
-          orderBy: [{ effectiveFrom: "desc" }]
-        })
-      : null) ??
-    (await db.feeStructure.findFirst({
-    where: {
+  try {
+    const result = await generateFeeInvoice({
       schoolId: session.schoolId,
-      classId: null
-    },
-    include: {
-      items: {
-        include: { feeHead: true }
-      }
-    },
-    orderBy: [{ effectiveFrom: "desc" }]
-  }));
+      academicYearId: academicYear.id,
+      ...parsed.data
+    });
 
-  if (!structure || !structure.items.length) {
-    return {
-      status: "error",
-      message: "No fee structure is available for this student's class."
-    };
-  }
-
-  const baseAmount = structure.items.reduce((sum, item) => sum + fromMoney(item.amount), 0);
-  const totalAmount = Math.max(
-    0,
-    baseAmount + parsed.data.fineAmount - parsed.data.discountAmount
-  );
-  const dueDate = new Date(`${parsed.data.dueDate}T23:59:59.999Z`);
-  const invoiceNumber = await nextInvoiceNumber(session.schoolId);
-
-  const invoice = await db.$transaction(async (tx) => {
-    const created = await tx.feeInvoice.create({
-      data: {
-        schoolId: session.schoolId,
-        academicYearId: academicYear.id,
-        studentId: student.id,
-        invoiceNumber,
-        dueDate,
-        totalAmount: toMoney(totalAmount),
-        discountAmount: toMoney(parsed.data.discountAmount),
-        fineAmount: toMoney(parsed.data.fineAmount),
-        notes: parsed.data.notes || null,
-        status: computeInvoiceStatus(totalAmount, 0, dueDate),
-        items: {
-          create: structure.items.map((item) => ({
-            feeHeadId: item.feeHeadId,
-            label: item.feeHead.name,
-            amount: item.amount
-          }))
-        }
-      },
-      include: {
-        items: true
+    await recordAuditLog({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: "fees.updated",
+      entityType: "FeeInvoice",
+      entityId: result.invoice.id,
+      metadata: {
+        subtype: "fees.invoice.generated",
+        invoiceNumber: result.invoiceNumber,
+        studentId: result.student.id,
+        structureId: result.structure.id,
+        discountAmount: parsed.data.discountAmount,
+        fineAmount: parsed.data.fineAmount,
+        totalAmount: result.totalAmount
       }
     });
 
-    return created;
-  });
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/fees");
 
-  await recordAuditLog({
-    actorUserId: session.userId,
-    schoolId: session.schoolId,
-    action: "fee_invoice.created",
-    entityType: "FeeInvoice",
-    entityId: invoice.id,
-    metadata: {
-      invoiceNumber,
-      studentId: student.id,
-      structureId: structure.id,
-      discountAmount: parsed.data.discountAmount,
-      fineAmount: parsed.data.fineAmount,
-      totalAmount
-    }
-  });
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/fees");
-
-  return {
-    status: "success",
-    message: `Invoice ${invoiceNumber} created successfully.`
-  };
+    return {
+      status: "success",
+      message: `Invoice ${result.invoiceNumber} created successfully.`
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to create invoice."
+    };
+  }
 }
 
 export async function collectFeePaymentAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageFees);
+  const session = await requirePermission(RBAC_PERMISSIONS.feesCollect);
   const parsed = feePaymentSchema.safeParse({
     feeInvoiceId: getString(formData, "feeInvoiceId"),
     paymentDate: getString(formData, "paymentDate"),
@@ -403,104 +248,52 @@ export async function collectFeePaymentAction(
     };
   }
 
-  const invoice = await db.feeInvoice.findFirst({
-    where: {
-      id: parsed.data.feeInvoiceId,
-      schoolId: session.schoolId
-    },
-    include: {
-      student: {
-        include: {
-          class: true,
-          section: true
-        }
-      },
-      items: true,
-      payments: true
-    }
-  });
+  try {
+    const result = await collectFeePayment({
+      schoolId: session.schoolId,
+      ...parsed.data
+    });
 
-  if (!invoice) {
-    return {
-      status: "error",
-      message: "Invoice not found."
-    };
-  }
-
-  const totalAmount = fromMoney(invoice.totalAmount);
-  const paidAmount = fromMoney(invoice.paidAmount);
-  const balanceBefore = Math.max(0, totalAmount - paidAmount);
-
-  if (parsed.data.amount > balanceBefore) {
-    return {
-      status: "error",
-      message: "Payment cannot exceed the current balance due."
-    };
-  }
-
-  const receiptNumber = await nextReceiptNumber(session.schoolId);
-  const paymentDate = new Date(`${parsed.data.paymentDate}T00:00:00.000Z`);
-  const nextPaidAmount = paidAmount + parsed.data.amount;
-  const nextStatus = computeInvoiceStatus(totalAmount, nextPaidAmount, invoice.dueDate);
-
-  const payment = await db.$transaction(async (tx) => {
-    const created = await tx.feePayment.create({
-      data: {
+    await Promise.all([
+      recordAuditLog({
+        actorUserId: session.userId,
         schoolId: session.schoolId,
-        feeInvoiceId: invoice.id,
-        receiptNumber,
-        paymentDate,
-        amount: toMoney(parsed.data.amount),
-        paymentMode: parsed.data.paymentMode,
-        referenceNo: parsed.data.referenceNo || null,
-        remarks: parsed.data.remarks || null
-      }
-    });
+        action: "fees.collected",
+        entityType: "FeePayment",
+        entityId: result.payment.id,
+        metadata: {
+          invoiceId: result.invoice.id,
+          receiptNumber: result.receiptNumber,
+          amount: parsed.data.amount,
+          paymentMode: parsed.data.paymentMode
+        }
+      }),
+      recordAuditLog({
+        actorUserId: session.userId,
+        schoolId: session.schoolId,
+        action: "fees.updated",
+        entityType: "FeeInvoice",
+        entityId: result.invoice.id,
+        metadata: {
+          subtype: "fees.invoice.updated",
+          paidAmount: result.nextPaidAmount,
+          balanceDue: Math.max(0, result.totalAmount - result.nextPaidAmount),
+          status: result.nextStatus
+        }
+      })
+    ]);
 
-    await tx.feeInvoice.update({
-      where: { id: invoice.id },
-      data: {
-        paidAmount: toMoney(nextPaidAmount),
-        status: nextStatus
-      }
-    });
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/fees");
 
-    return created;
-  });
-
-  await Promise.all([
-    recordAuditLog({
-      actorUserId: session.userId,
-      schoolId: session.schoolId,
-      action: "fee_payment.collected",
-      entityType: "FeePayment",
-      entityId: payment.id,
-      metadata: {
-        invoiceId: invoice.id,
-        receiptNumber,
-        amount: parsed.data.amount,
-        paymentMode: parsed.data.paymentMode
-      }
-    }),
-    recordAuditLog({
-      actorUserId: session.userId,
-      schoolId: session.schoolId,
-      action: "fee_invoice.updated",
-      entityType: "FeeInvoice",
-      entityId: invoice.id,
-      metadata: {
-        paidAmount: nextPaidAmount,
-        balanceDue: Math.max(0, totalAmount - nextPaidAmount),
-        status: nextStatus
-      }
-    })
-  ]);
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/fees");
-
-  return {
-    status: "success",
-    message: `Payment recorded with receipt ${receiptNumber}.`
-  };
+    return {
+      status: "success",
+      message: `Payment recorded with receipt ${result.receiptNumber}.`
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Unable to collect payment."
+    };
+  }
 }

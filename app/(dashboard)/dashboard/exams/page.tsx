@@ -9,13 +9,12 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
-import { gradeBandsToText, getGradeBands } from "@/lib/exams";
-import { requirePermission } from "@/lib/auth/access";
-import { db } from "@/lib/db";
-import { PERMISSIONS } from "@/lib/permissions";
+import { gradeBandsToText } from "@/lib/exams";
+import { requireAnyPermission } from "@/lib/rbac/guards";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
+import { getExamWorkspaceData } from "@/lib/services/exams.service";
 import { toDateInput } from "@/lib/school";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -29,124 +28,48 @@ export default async function ExamsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const session = await requirePermission(PERMISSIONS.viewExams);
+  const session = await requireAnyPermission([
+    RBAC_PERMISSIONS.examsRead,
+    RBAC_PERMISSIONS.examsReadOwn,
+    RBAC_PERMISSIONS.examsReadChild,
+    RBAC_PERMISSIONS.examsMarksEntry,
+    RBAC_PERMISSIONS.examsMarksModerate,
+    RBAC_PERMISSIONS.examsPublishResult
+  ]);
   const params = await searchParams;
 
-  const [classes, sections, subjects, exams, gradeBands] = await Promise.all([
-    db.schoolClass.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ displayOrder: "asc" }, { name: "asc" }]
-    }),
-    db.section.findMany({
-      where: { schoolId: session.schoolId },
-      include: { class: true },
-      orderBy: [{ class: { displayOrder: "asc" } }, { name: "asc" }]
-    }),
-    db.subject.findMany({
-      where: { schoolId: session.schoolId },
-      orderBy: [{ name: "asc" }]
-    }),
-    db.exam.findMany({
-      where: { schoolId: session.schoolId },
-      include: {
-        class: true,
-        examSubjects: {
-          include: { subject: true }
-        },
-        results: true
-      },
-      orderBy: [{ startDate: "desc" }]
-    }),
-    getGradeBands(session.schoolId)
-  ]);
-
-  const examId = asSingle(params.examId) ?? exams[0]?.id ?? "";
-  const selectedExam = exams.find((item) => item.id === examId) ?? exams[0];
-  const examSubjects = selectedExam?.examSubjects ?? [];
-  const examSubjectId = asSingle(params.examSubjectId) ?? examSubjects[0]?.id ?? "";
-  const selectedExamSubject = examSubjects.find((item) => item.id === examSubjectId) ?? examSubjects[0];
-  const examClassId = selectedExam?.classId ?? "";
-  const availableSections = examClassId
-    ? sections.filter((section) => section.classId === examClassId)
-    : sections;
-  const sectionId = asSingle(params.sectionId) ?? availableSections[0]?.id ?? "";
-  const selectedSection = availableSections.find((item) => item.id === sectionId) ?? availableSections[0];
-
-  const students = selectedSection
-    ? await db.student.findMany({
-        where: {
-          schoolId: session.schoolId,
-          classId: selectedSection.classId,
-          sectionId: selectedSection.id,
-          status: { not: "ARCHIVED" }
-        },
-        orderBy: [{ rollNumber: "asc" }, { fullName: "asc" }]
-      })
-    : [];
-
-  const existingMarks = selectedExam && selectedExamSubject
-    ? await db.examMark.findMany({
-        where: {
-          examId: selectedExam.id,
-          examSubjectId: selectedExamSubject.id,
-          studentId: { in: students.map((student) => student.id) }
-        }
-      })
-    : [];
-
-  const existingResults = selectedExam
-    ? await db.examResult.findMany({
-        where: {
-          examId: selectedExam.id,
-          studentId: { in: students.map((student) => student.id) }
-        }
-      })
-    : [];
-
-  const marksMap = new Map(existingMarks.map((item) => [item.studentId, item]));
-  const resultsMap = new Map(existingResults.map((item) => [item.studentId, item]));
-
-  const studentResultId = asSingle(params.studentId) ?? students[0]?.id ?? "";
-  const selectedStudent = students.find((item) => item.id === studentResultId) ?? students[0];
-  const selectedStudentResult = selectedStudent ? resultsMap.get(selectedStudent.id) : undefined;
-  const studentResultHistory = selectedStudent
-    ? await db.examResult.findMany({
-        where: {
-          studentId: selectedStudent.id,
-          student: { schoolId: session.schoolId }
-        },
-        include: { exam: true },
-        orderBy: [{ createdAt: "desc" }]
-      })
-    : [];
-
-  const classResults = selectedExam
-    ? await db.examResult.findMany({
-        where: {
-          examId: selectedExam.id,
-          student: {
-            schoolId: session.schoolId,
-            ...(selectedSection
-              ? { classId: selectedSection.classId, sectionId: selectedSection.id }
-              : {})
-          }
-        },
-        include: {
-          student: true
-        },
-        orderBy: [{ percentage: "desc" }]
-      })
-    : [];
-
-  const passCount = classResults.filter((item) => item.resultStatus === "PASS").length;
-  const failCount = classResults.filter((item) => item.resultStatus === "FAIL").length;
-  const averagePercentage = classResults.length
-    ? Number(
-        (
-          classResults.reduce((sum, item) => sum + Number(item.percentage), 0) / classResults.length
-        ).toFixed(2)
-      )
-    : 0;
+  const examId = asSingle(params.examId) ?? "";
+  const examSubjectId = asSingle(params.examSubjectId) ?? "";
+  const sectionId = asSingle(params.sectionId) ?? "";
+  const studentResultId = asSingle(params.studentId) ?? "";
+  const {
+    classes,
+    sections,
+    subjects,
+    exams,
+    gradeBands,
+    selectedExam,
+    examSubjects,
+    selectedExamSubject,
+    availableSections,
+    selectedSection,
+    students,
+    marksMap,
+    selectedStudent,
+    selectedStudentResult,
+    studentResultHistory,
+    classResults,
+    passCount,
+    failCount,
+    averagePercentage
+  } = await getExamWorkspaceData({
+    schoolId: session.schoolId,
+    viewer: session,
+    examId,
+    examSubjectId,
+    sectionId,
+    studentId: studentResultId
+  });
 
   return (
     <div className="grid gap-6">

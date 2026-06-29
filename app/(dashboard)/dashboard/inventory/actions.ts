@@ -1,14 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { InventoryMovementType, Prisma } from "@prisma/client";
+import { InventoryMovementType } from "@prisma/client";
 
 import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { inventoryItemSchema, inventoryMovementSchema, movementDirection } from "@/lib/inventory";
 import { PERMISSIONS } from "@/lib/permissions";
+import {
+  archiveInventoryItem,
+  saveInventoryItem,
+  saveInventoryMovement
+} from "@/lib/services/inventory.service";
+import { inventoryItemSchema, inventoryMovementSchema, movementDirection } from "@/lib/validations/inventory";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -48,54 +52,19 @@ export async function saveInventoryItemAction(
   const data = parsed.data;
 
   try {
-    const item = data.id
-      ? await (async () => {
-          const existing = await db.inventoryItem.findFirst({
-            where: { id: data.id, schoolId: session.schoolId },
-            select: { id: true }
-          });
-
-          if (!existing) {
-            throw new Error("Inventory item not found.");
-          }
-
-          return db.inventoryItem.update({
-            where: { id: existing.id },
-            data: {
-              itemCode: data.itemCode,
-              name: data.name,
-              category: data.category || null,
-              unit: data.unit,
-              supplierName: data.supplierName || null,
-              location: data.location || null,
-              minimumQuantity: data.minimumQuantity,
-              quantityOnHand: data.quantityOnHand,
-              unitCost:
-                data.unitCost === undefined || data.unitCost === ""
-                  ? null
-                  : new Prisma.Decimal(data.unitCost),
-              isArchived: false,
-              archivedAt: null
-            }
-          });
-        })()
-      : await db.inventoryItem.create({
-          data: {
-            schoolId: session.schoolId,
-            itemCode: data.itemCode,
-            name: data.name,
-            category: data.category || null,
-            unit: data.unit,
-            supplierName: data.supplierName || null,
-            location: data.location || null,
-            minimumQuantity: data.minimumQuantity,
-            quantityOnHand: data.quantityOnHand,
-            unitCost:
-              data.unitCost === undefined || data.unitCost === ""
-                ? null
-                : new Prisma.Decimal(data.unitCost)
-          }
-        });
+    const item = await saveInventoryItem({
+      schoolId: session.schoolId,
+      id: data.id,
+      itemCode: data.itemCode,
+      name: data.name,
+      category: data.category,
+      unit: data.unit,
+      supplierName: data.supplierName,
+      location: data.location,
+      minimumQuantity: data.minimumQuantity,
+      quantityOnHand: data.quantityOnHand,
+      unitCost: data.unitCost
+    });
 
     await recordAuditLog({
       actorUserId: session.userId,
@@ -120,18 +89,7 @@ export async function archiveInventoryItemAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.manageInventory);
   const itemId = getString(formData, "itemId");
   if (!itemId) return;
-
-  const item = await db.inventoryItem.findFirst({
-    where: { id: itemId, schoolId: session.schoolId },
-    select: { id: true }
-  });
-
-  if (!item) return;
-
-  await db.inventoryItem.update({
-    where: { id: item.id },
-    data: { isArchived: true, archivedAt: new Date() }
-  });
+  const item = await archiveInventoryItem({ schoolId: session.schoolId, itemId });
 
   await recordAuditLog({
     actorUserId: session.userId,
@@ -172,38 +130,17 @@ export async function saveInventoryMovementAction(
   const signedQuantity = direction * data.quantity;
 
   try {
-    const movement = await db.$transaction(async (tx) => {
-      const item = await tx.inventoryItem.findFirst({
-        where: { id: data.itemId, schoolId: session.schoolId, isArchived: false }
-      });
-
-      if (!item) {
-        throw new Error("Inventory item not found.");
-      }
-
-      const nextQuantity = item.quantityOnHand + signedQuantity;
-      if (nextQuantity < 0) {
-        throw new Error("Stock out cannot be greater than quantity on hand.");
-      }
-
-      await tx.inventoryItem.update({
-        where: { id: item.id },
-        data: { quantityOnHand: nextQuantity }
-      });
-
-      return tx.inventoryMovement.create({
-        data: {
-          schoolId: session.schoolId,
-          itemId: item.id,
-          movementType: data.movementType as InventoryMovementType,
-          quantity: data.quantity,
-          movementDate: new Date(`${data.movementDate}T00:00:00.000Z`),
-          reference: data.reference || null,
-          issuedTo: data.issuedTo || null,
-          notes: data.notes || null,
-          createdById: session.userId
-        }
-      });
+    const movement = await saveInventoryMovement({
+      schoolId: session.schoolId,
+      userId: session.userId,
+      itemId: data.itemId,
+      movementType: data.movementType as InventoryMovementType,
+      quantity: data.quantity,
+      movementDate: data.movementDate,
+      reference: data.reference,
+      issuedTo: data.issuedTo,
+      notes: data.notes,
+      signedQuantity
     });
 
     await recordAuditLog({
