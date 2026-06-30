@@ -9,14 +9,15 @@ import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
 import { payrollPeriodLabel } from "@/lib/payroll";
-import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import { getPayrollPageData } from "@/lib/services/payroll.service";
 import { formatCurrency } from "@/lib/utils";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 export default async function PayrollPage() {
-  const session = await requirePermission(PERMISSIONS.viewPayroll);
-  const canManagePayroll = session.permissions.includes(PERMISSIONS.managePayroll);
+  const session = await requirePermission(RBAC_PERMISSIONS.payrollRead);
+  const canCreatePayroll = session.permissions.includes(RBAC_PERMISSIONS.payrollRun);
+  const canApprovePayroll = session.permissions.includes(RBAC_PERMISSIONS.payrollApprove);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "payroll");
   const { staffWithSalary, payrollRuns, payrollSlips, monthlyPayroll, draftSlips, paidThisCycle, latestRun } =
     await getPayrollPageData({ schoolId: session.schoolId });
@@ -39,13 +40,13 @@ export default async function PayrollPage() {
       <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
         <Card>
           <CardHeader>
-            <CardTitle>{canManagePayroll ? "Generate payroll" : "Payroll controls"}</CardTitle>
+            <CardTitle>{canCreatePayroll ? "Generate payroll" : "Payroll controls"}</CardTitle>
             <p className="text-sm leading-6 text-slate-600">
-              {canManagePayroll ? "Create a monthly payroll run from active staff records that have salary references." : accessCopy.summary}
+              {canCreatePayroll ? "Create a monthly payroll run from active staff records that have salary references." : accessCopy.summary}
             </p>
           </CardHeader>
           <CardContent>
-            {canManagePayroll ? <PayrollRunForm /> : <EmptyState title={accessCopy.title} description={accessCopy.description} />}
+            {canCreatePayroll ? <PayrollRunForm /> : <EmptyState title={accessCopy.title} description={accessCopy.description} />}
           </CardContent>
         </Card>
 
@@ -68,7 +69,7 @@ export default async function PayrollPage() {
                           <TD>{run.slips.length}</TD>
                           <TD>{formatCurrency(totalNet)}</TD>
                           <TD><StatusBadge status={run.status} toneMap={{ PAID: "bg-emerald-50 text-emerald-700", APPROVED: "bg-blue-50 text-blue-700", FINALIZED: "bg-blue-50 text-blue-700", CANCELLED: "bg-red-50 text-red-700", DRAFT: "bg-amber-50 text-amber-700" }} /></TD>
-                          <TD className="text-right">{canManagePayroll ? <Dialog title={`Update ${run.title}`} description="Finalize, mark paid, or cancel this payroll cycle." triggerLabel="Update"><PayrollRunStatusForm payrollRunId={run.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD>
+                          <TD className="text-right">{canApprovePayroll ? <Dialog title={`Update ${run.title}`} description="Approve, mark paid, or reject this payroll cycle." triggerLabel="Update"><PayrollRunStatusForm payrollRunId={run.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD>
                         </tr>
                       );
                     })}
@@ -102,7 +103,7 @@ export default async function PayrollPage() {
                       <TD>{formatCurrency(Number(slip.deductions))}</TD>
                       <TD className="font-medium text-slate-950">{formatCurrency(Number(slip.netPay))}</TD>
                       <TD><StatusBadge status={slip.status} toneMap={{ PAID: "bg-emerald-50 text-emerald-700", APPROVED: "bg-blue-50 text-blue-700", FINALIZED: "bg-blue-50 text-blue-700", CANCELLED: "bg-red-50 text-red-700", DRAFT: "bg-amber-50 text-amber-700" }} /></TD>
-                      <TD className="text-right">{canManagePayroll ? <Dialog title={`Update ${slip.staffName}`} description="Approve this payslip or mark it as paid." triggerLabel="Update"><PayrollSlipStatusForm slipId={slip.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD>
+                      <TD className="text-right">{canApprovePayroll ? <Dialog title={`Update ${slip.staffName}`} description="Approve this payslip or mark it as paid." triggerLabel="Update"><PayrollSlipStatusForm slipId={slip.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD>
                     </tr>
                   ))}
                 </TBody>

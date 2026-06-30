@@ -43,6 +43,7 @@ export default async function AttendancePage({
   const sectionId = asSingle(params.sectionId) ?? "";
   const date = asSingle(params.date) ?? toDateInput();
   const month = asSingle(params.month) ?? "";
+  const year = asSingle(params.year) ?? "";
   const {
     classes,
     sections,
@@ -50,14 +51,17 @@ export default async function AttendancePage({
     selectedSection,
     students,
     dayAttendances,
-    monthlyAttendances
+    monthlyAttendances,
+    date: safeDate,
+    month: safeMonth
   } = await getAttendancePageData({
     schoolId: session.schoolId,
     viewer: session,
     classId,
     sectionId,
     date,
-    month
+    month,
+    year
   });
 
   if (!classes.length) {
@@ -155,10 +159,10 @@ export default async function AttendancePage({
               </Select>
             </FormField>
             <FormField label="Date" htmlFor="date">
-              <Input id="date" name="date" type="date" defaultValue={date} />
+              <Input id="date" name="date" type="date" defaultValue={safeDate} />
             </FormField>
             <FormField label="Month" htmlFor="month">
-              <Input id="month" name="month" type="month" defaultValue={month} />
+              <Input id="month" name="month" type="month" defaultValue={safeMonth} />
             </FormField>
             <Button type="submit">Load sheet</Button>
           </form>
@@ -174,7 +178,7 @@ export default async function AttendancePage({
               className={selectedClass.name}
               sectionId={selectedSection.id}
               sectionName={selectedSection.name}
-              date={date}
+              date={safeDate}
             />
           ) : (
             <EmptyState
@@ -260,7 +264,7 @@ export default async function AttendancePage({
                   </div>
                 ) : (
                   <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-                    No attendance rows have been marked for {month} yet.
+                    No attendance rows have been marked for {safeMonth} yet.
                   </p>
                 )}
               </CardContent>

@@ -114,14 +114,6 @@ function matchesPath(pathname: string, href: string) {
   return normalizedPath === normalizedHref || normalizedPath.startsWith(`${normalizedHref}/`);
 }
 
-function childCanMatchRoute(user: ModuleAccessUser, child: AppModuleChild, pathname: string) {
-  return (
-    child.status !== "hidden" &&
-    matchesPath(pathname, child.href) &&
-    hasAnyModulePermission(user, child.requiredPermissions)
-  );
-}
-
 export function canAccessRoute(user: ModuleAccessUser, pathname: string) {
   const normalizedPath = normalizePathname(pathname);
 
@@ -129,25 +121,41 @@ export function canAccessRoute(user: ModuleAccessUser, pathname: string) {
     return false;
   }
 
-  for (const module of APP_MODULES) {
-    if (module.status === "hidden") {
-      continue;
-    }
+  const childMatches = APP_MODULES.flatMap((module) =>
+    (module.children ?? [])
+      .filter((child) => child.status !== "hidden" && matchesPath(normalizedPath, child.href))
+      .map((child) => ({
+        href: child.href,
+        allowed: hasAllowedRole(user, module.allowedRoles) && hasAnyModulePermission(user, child.requiredPermissions)
+      }))
+  ).sort((left, right) => normalizePathname(right.href).length - normalizePathname(left.href).length);
 
-    if (!hasAllowedRole(user, module.allowedRoles)) {
-      continue;
-    }
-
-    if (matchesPath(normalizedPath, module.href) && hasAnyModulePermission(user, module.requiredPermissions)) {
-      return true;
-    }
-
-    if ((module.children ?? []).some((child) => childCanMatchRoute(user, child, normalizedPath))) {
-      return true;
-    }
+  if (childMatches.length > 0) {
+    return childMatches[0]?.allowed ?? false;
   }
 
-  return false;
+  const moduleMatches = APP_MODULES.filter(
+    (module) => module.status !== "hidden" && matchesPath(normalizedPath, module.href)
+  ).sort((left, right) => normalizePathname(right.href).length - normalizePathname(left.href).length);
+
+  if (moduleMatches.length === 0) {
+    return false;
+  }
+
+  const bestMatch = moduleMatches[0];
+  if (
+    normalizedPath !== ROOT_DASHBOARD &&
+    normalizedPath.startsWith(`${ROOT_DASHBOARD}/`) &&
+    normalizePathname(bestMatch?.href) === ROOT_DASHBOARD
+  ) {
+    return false;
+  }
+
+  if (!bestMatch || !hasAllowedRole(user, bestMatch.allowedRoles)) {
+    return false;
+  }
+
+  return hasAnyModulePermission(user, bestMatch.requiredPermissions);
 }
 
 export function getVisibleModules(user: ModuleAccessUser) {

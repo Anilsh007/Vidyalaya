@@ -5,19 +5,17 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import {
-  createPayrollRun,
-  updatePayrollRunStatus,
   updatePayrollSlipStatus
 } from "@/lib/services/payroll.service";
 import {
-  parsePayrollPeriod,
-  payrollPeriodLabel,
   payrollRunSchema,
   payrollRunStatusSchema,
   payrollSlipStatusSchema
 } from "@/lib/validations/payroll";
+import { approveRequest, completeRequest, createApprovalRequest, rejectRequest } from "@/lib/workflows/workflow.service";
+import { WORKFLOW_TYPES } from "@/lib/workflows/types";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -27,7 +25,7 @@ export async function createPayrollRunAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.managePayroll);
+  const session = await requirePermission(RBAC_PERMISSIONS.payrollRun);
   const parsed = payrollRunSchema.safeParse({
     period: getString(formData, "period"),
     paymentDate: getString(formData, "paymentDate"),
@@ -38,23 +36,17 @@ export async function createPayrollRunAction(
     return { status: "error", message: "Please review payroll run details.", fieldErrors: parsed.error.flatten().fieldErrors };
   }
 
-  const { periodMonth, periodYear } = parsePayrollPeriod(parsed.data.period);
-  const title = `${payrollPeriodLabel(periodMonth, periodYear)} Payroll`;
-
   try {
-    const { payrollRun, staffCount } = await createPayrollRun({
-      schoolId: session.schoolId,
-      userId: session.userId,
-      title,
-      periodMonth,
-      periodYear,
+    const workflow = await createApprovalRequest({
+      workflowType: WORKFLOW_TYPES.PAYROLL_RUN,
+      actor: session,
+      period: parsed.data.period,
       paymentDate: parsed.data.paymentDate,
       notes: parsed.data.notes
     });
 
-    await recordAuditLog({ actorUserId: session.userId, schoolId: session.schoolId, action: "payroll.run.created", entityType: "PayrollRun", entityId: payrollRun.id, metadata: { title, slips: staffCount } });
     revalidatePath("/dashboard/payroll");
-    return { status: "success", message: `Payroll run created with ${staffCount} slip(s).` };
+    return { status: "success", message: `${workflow.title} generated and queued for approval.` };
   } catch (error) {
     const message = error instanceof Error && error.message.includes("Unique constraint") ? "Payroll for this month already exists." : error instanceof Error ? error.message : "Unable to create payroll run.";
     return { status: "error", message };
@@ -65,7 +57,7 @@ export async function updatePayrollSlipStatusAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.managePayroll);
+  const session = await requirePermission(RBAC_PERMISSIONS.payrollApprove);
   const parsed = payrollSlipStatusSchema.safeParse({
     slipId: getString(formData, "slipId"),
     status: getString(formData, "status"),
@@ -96,10 +88,11 @@ export async function updatePayrollRunStatusAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.managePayroll);
+  const session = await requirePermission(RBAC_PERMISSIONS.payrollRead);
   const parsed = payrollRunStatusSchema.safeParse({
     payrollRunId: getString(formData, "payrollRunId"),
-    status: getString(formData, "status")
+    status: getString(formData, "status"),
+    remarks: getString(formData, "remarks")
   });
 
   if (!parsed.success) {
@@ -107,15 +100,23 @@ export async function updatePayrollRunStatusAction(
   }
 
   try {
-    const payrollRun = await updatePayrollRunStatus({
-      schoolId: session.schoolId,
-      payrollRunId: parsed.data.payrollRunId,
-      status: parsed.data.status
-    });
+    const workflowInput = {
+      actor: session,
+      workflowType: WORKFLOW_TYPES.PAYROLL_RUN,
+      targetId: parsed.data.payrollRunId,
+      remarks: parsed.data.remarks
+    } as const;
 
-    await recordAuditLog({ actorUserId: session.userId, schoolId: session.schoolId, action: "payroll.run.status.updated", entityType: "PayrollRun", entityId: payrollRun.id, metadata: { status: parsed.data.status } });
+    if (parsed.data.status === "FINALIZED") {
+      await approveRequest(workflowInput);
+    } else if (parsed.data.status === "PAID") {
+      await completeRequest(workflowInput);
+    } else {
+      await rejectRequest(workflowInput);
+    }
+
     revalidatePath("/dashboard/payroll");
-    return { status: "success", message: "Payroll run status updated." };
+    return { status: "success", message: "Payroll workflow updated." };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "Unable to update payroll run." };
   }

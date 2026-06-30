@@ -5,18 +5,17 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/access";
 import { recordAuditLog } from "@/lib/audit";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import {
-  createExpenseVoucher,
-  generateExpenseVoucherNumber,
   saveExpenseCategory,
-  updateExpenseVoucherStatus
 } from "@/lib/services/accounts.service";
 import {
   expenseCategorySchema,
   expenseVoucherSchema,
   expenseVoucherStatusSchema
 } from "@/lib/validations/accounts";
+import { approveRequest, completeRequest, createApprovalRequest, rejectRequest } from "@/lib/workflows/workflow.service";
+import { WORKFLOW_TYPES } from "@/lib/workflows/types";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -31,7 +30,7 @@ export async function saveExpenseCategoryAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageAccounts);
+  const session = await requirePermission(RBAC_PERMISSIONS.accountsExpensesManage);
   const parsed = expenseCategorySchema.safeParse({
     id: getOptionalString(formData, "id"),
     name: getString(formData, "name"),
@@ -68,7 +67,7 @@ export async function createExpenseVoucherAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageAccounts);
+  const session = await requirePermission(RBAC_PERMISSIONS.accountsExpensesManage);
   const parsed = expenseVoucherSchema.safeParse({
     categoryId: getString(formData, "categoryId"),
     expenseDate: getString(formData, "expenseDate"),
@@ -87,11 +86,10 @@ export async function createExpenseVoucherAction(
   const data = parsed.data;
 
   try {
-    const voucherNumber = await generateExpenseVoucherNumber(session.schoolId);
-    const voucher = await createExpenseVoucher({
-      schoolId: session.schoolId,
+    const workflow = await createApprovalRequest({
+      workflowType: WORKFLOW_TYPES.EXPENSE_VOUCHER,
+      actor: session,
       categoryId: data.categoryId,
-      voucherNumber,
       expenseDate: data.expenseDate,
       paidTo: data.paidTo,
       vendorName: data.vendorName,
@@ -101,9 +99,8 @@ export async function createExpenseVoucherAction(
       description: data.description
     });
 
-    await recordAuditLog({ actorUserId: session.userId, schoolId: session.schoolId, action: "expense.voucher.created", entityType: "ExpenseVoucher", entityId: voucher.id, metadata: { voucherNumber, amount: data.amount } });
     revalidatePath("/dashboard/accounts");
-    return { status: "success", message: `Expense voucher ${voucherNumber} created.` };
+    return { status: "success", message: `Expense voucher ${workflow.title} submitted.` };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "Unable to create expense voucher." };
   }
@@ -113,10 +110,11 @@ export async function updateExpenseVoucherStatusAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageAccounts);
+  const session = await requirePermission(RBAC_PERMISSIONS.accountsRead);
   const parsed = expenseVoucherStatusSchema.safeParse({
     voucherId: getString(formData, "voucherId"),
-    status: getString(formData, "status")
+    status: getString(formData, "status"),
+    remarks: getString(formData, "remarks")
   });
 
   if (!parsed.success) {
@@ -124,16 +122,23 @@ export async function updateExpenseVoucherStatusAction(
   }
 
   try {
-    const voucher = await updateExpenseVoucherStatus({
-      schoolId: session.schoolId,
-      userId: session.userId,
-      voucherId: parsed.data.voucherId,
-      status: parsed.data.status
-    });
+    const workflowInput = {
+      actor: session,
+      workflowType: WORKFLOW_TYPES.EXPENSE_VOUCHER,
+      targetId: parsed.data.voucherId,
+      remarks: parsed.data.remarks
+    } as const;
 
-    await recordAuditLog({ actorUserId: session.userId, schoolId: session.schoolId, action: "expense.voucher.status.updated", entityType: "ExpenseVoucher", entityId: voucher.id, metadata: { status: parsed.data.status } });
+    if (parsed.data.status === "APPROVED") {
+      await approveRequest(workflowInput);
+    } else if (parsed.data.status === "PAID") {
+      await completeRequest(workflowInput);
+    } else {
+      await rejectRequest(workflowInput);
+    }
+
     revalidatePath("/dashboard/accounts");
-    return { status: "success", message: "Expense voucher status updated." };
+    return { status: "success", message: "Expense workflow updated." };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "Unable to update expense voucher." };
   }

@@ -3,11 +3,13 @@ import { NextResponse } from "next/server";
 import { recordAuditLog } from "@/lib/audit";
 import { recordSecurityAuditEvent } from "@/lib/audit/audit.service";
 import { getOptionalSession } from "@/lib/auth/session";
-import { hasPermission } from "@/lib/rbac/guards";
-import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import { rowsToCsv } from "@/lib/reports";
-import { getReportRows } from "@/lib/services/reports.service";
-import { reportTypeSchema } from "@/lib/validations/reports";
+import {
+  assertCanAccessReport,
+  getReportRows,
+  type ReportType
+} from "@/lib/services/reports.service";
+import { reportTypeSchema, reportsFilterSchema } from "@/lib/validations/reports";
 
 type Params = Promise<{ reportType: string }>;
 
@@ -16,17 +18,6 @@ export async function GET(request: Request, { params }: { params: Params }) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(session, RBAC_PERMISSIONS.reportsExport)) {
-    await recordSecurityAuditEvent({
-      actorUserId: session.userId,
-      schoolId: session.schoolId,
-      action: "auth.api.forbidden",
-      entityType: "Route",
-      entityId: "api.reports.export",
-      metadata: { url: request.url }
-    });
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   const { reportType: rawReportType } = await params;
   const parsedType = reportTypeSchema.safeParse(rawReportType);
@@ -34,24 +25,43 @@ export async function GET(request: Request, { params }: { params: Params }) {
     return NextResponse.json({ error: "Unknown report type" }, { status: 404 });
   }
 
-  const url = new URL(request.url);
-  const classId = url.searchParams.get("classId") || undefined;
-  const sectionId = url.searchParams.get("sectionId") || undefined;
-  const examId = url.searchParams.get("examId") || undefined;
-  const startDate = url.searchParams.get("startDate")
-    ? new Date(`${url.searchParams.get("startDate")}T00:00:00.000Z`)
-    : undefined;
-  const endDate = url.searchParams.get("endDate")
-    ? new Date(`${url.searchParams.get("endDate")}T23:59:59.999Z`)
-    : undefined;
+  const reportType = parsedType.data as ReportType;
 
-  const rows = await getReportRows(parsedType.data, {
+  try {
+    assertCanAccessReport(session, reportType, "export");
+  } catch (error) {
+    await recordSecurityAuditEvent({
+      actorUserId: session.userId,
+      schoolId: session.schoolId,
+      action: "auth.api.forbidden",
+      entityType: "Route",
+      entityId: `api.reports.export.${reportType}`,
+      metadata: { url: request.url, reportType }
+    });
+
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Forbidden" },
+      { status: 403 }
+    );
+  }
+
+  const url = new URL(request.url);
+  const parsedFilters = reportsFilterSchema.safeParse({
+    classId: url.searchParams.get("classId") ?? "",
+    sectionId: url.searchParams.get("sectionId") ?? "",
+    examId: url.searchParams.get("examId") ?? "",
+    startDate: url.searchParams.get("startDate") ?? "",
+    endDate: url.searchParams.get("endDate") ?? ""
+  });
+  const safeFilters = parsedFilters.success ? parsedFilters.data : {};
+
+  const rows = await getReportRows(session, reportType, {
     schoolId: session.schoolId,
-    classId,
-    sectionId,
-    examId,
-    startDate,
-    endDate
+    classId: safeFilters.classId || undefined,
+    sectionId: safeFilters.sectionId || undefined,
+    examId: safeFilters.examId || undefined,
+    startDate: safeFilters.startDate ? new Date(`${safeFilters.startDate}T00:00:00.000Z`) : undefined,
+    endDate: safeFilters.endDate ? new Date(`${safeFilters.endDate}T23:59:59.999Z`) : undefined
   });
 
   await recordAuditLog({
@@ -60,12 +70,12 @@ export async function GET(request: Request, { params }: { params: Params }) {
     action: "report.exported",
     entityType: "Report",
     metadata: {
-      reportType: parsedType.data,
-      classId: classId ?? null,
-      sectionId: sectionId ?? null,
-      examId: examId ?? null,
-      startDate: startDate?.toISOString() ?? null,
-      endDate: endDate?.toISOString() ?? null,
+      reportType,
+      classId: safeFilters.classId ?? null,
+      sectionId: safeFilters.sectionId ?? null,
+      examId: safeFilters.examId ?? null,
+      startDate: safeFilters.startDate ?? null,
+      endDate: safeFilters.endDate ?? null,
       rowCount: rows.length
     }
   });
@@ -74,7 +84,7 @@ export async function GET(request: Request, { params }: { params: Params }) {
   return new NextResponse(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${parsedType.data}-report.csv"`
+      "Content-Disposition": `attachment; filename="${reportType}-report.csv"`
     }
   });
 }

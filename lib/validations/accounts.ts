@@ -22,7 +22,8 @@ export const expenseVoucherSchema = z.object({
 
 export const expenseVoucherStatusSchema = z.object({
   voucherId: z.string().min(1, "Expense voucher is required."),
-  status: z.enum(["APPROVED", "PAID", "CANCELLED"])
+  status: z.enum(["APPROVED", "PAID", "CANCELLED"]),
+  remarks: z.string().trim().max(500, "Remarks must be 500 characters or fewer.").optional()
 });
 
 export async function nextExpenseVoucherNumber(count: number) {

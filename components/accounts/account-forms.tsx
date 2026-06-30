@@ -112,13 +112,16 @@ export function ExpenseVoucherStatusForm({ voucherId }: { voucherId: string }) {
       <div className="grid gap-2">
         <FormField label="Voucher status" htmlFor={`voucher-status-${voucherId}`}>
           <Select id={`voucher-status-${voucherId}`} name="status" defaultValue="APPROVED">
-            <option value="APPROVED">Approve</option>
+            <option value="APPROVED">Approve voucher</option>
             <option value="PAID">Mark paid</option>
-            <option value="CANCELLED">Cancel</option>
+            <option value="CANCELLED">Reject voucher</option>
           </Select>
         </FormField>
         <FieldError error={state.fieldErrors?.status} />
       </div>
+      <FormField label="Remarks" htmlFor={`voucher-remarks-${voucherId}`}>
+        <Textarea id={`voucher-remarks-${voucherId}`} name="remarks" className="min-h-[90px]" placeholder="Optional approval or rejection remarks" />
+      </FormField>
       <div className="flex justify-end"><SubmitButton pendingLabel="Updating voucher...">Update voucher</SubmitButton></div>
       <FormStateMessage state={state} />
     </form>

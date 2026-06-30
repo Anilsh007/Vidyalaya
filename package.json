@@ -7,6 +7,7 @@
     "build": "next build",
     "build:prod": "next build",
     "start": "next start",
+    "start:lan": "next start -H 0.0.0.0 -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "prisma:validate": "prisma validate",
@@ -14,10 +15,11 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
-    "setup:local": "npm run prisma:generate && npm run prisma:migrate && npm run prisma:seed"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "setup:local": "npm run prisma:generate && npm run prisma:migrate && npm run prisma:seed",
+    "verify:reports": "tsx scripts/dev/verify-phase-9a-reports.ts",
+    "verify:workflows": "tsx scripts/dev/verify-phase-8a1-workflows.ts",
+    "verify:rbac": "tsx scripts/dev/verify-rbac.ts",
+    "verify:routing": "tsx scripts/dev/verify-routing-access.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.8.2",

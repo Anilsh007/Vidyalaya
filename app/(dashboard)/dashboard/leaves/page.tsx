@@ -8,13 +8,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
-import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import { getLeavesPageData } from "@/lib/services/leaves.service";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 export default async function LeavesPage() {
-  const session = await requirePermission(PERMISSIONS.viewLeaves);
-  const canManageLeaves = session.permissions.includes(PERMISSIONS.manageLeaves);
+  const session = await requirePermission(RBAC_PERMISSIONS.leavesRead);
+  const canRequestLeaves =
+    session.permissions.includes(RBAC_PERMISSIONS.leavesRequest) ||
+    session.permissions.includes(RBAC_PERMISSIONS.leavesManage);
+  const canApproveLeaves =
+    session.permissions.includes(RBAC_PERMISSIONS.leavesApprove) ||
+    session.permissions.includes(RBAC_PERMISSIONS.leavesManage);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "leaves");
   const { students, staff, leaveRequests, pendingLeaves, approvedThisMonth, studentLeaves, staffLeaves } =
     await getLeavesPageData({ schoolId: session.schoolId });
@@ -37,13 +42,13 @@ export default async function LeavesPage() {
       <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
         <Card>
           <CardHeader>
-            <CardTitle>{canManageLeaves ? "New leave request" : "Leave controls"}</CardTitle>
+            <CardTitle>{canRequestLeaves ? "New leave request" : "Leave controls"}</CardTitle>
             <p className="text-sm leading-6 text-slate-600">
-              {canManageLeaves ? "Create student or staff leave requests with inclusive start and end dates." : accessCopy.summary}
+              {canRequestLeaves ? "Create student or staff leave requests with inclusive start and end dates." : accessCopy.summary}
             </p>
           </CardHeader>
           <CardContent>
-            {canManageLeaves ? (
+            {canRequestLeaves ? (
               <LeaveRequestForm
                 students={students.map((student) => ({ id: student.id, name: student.fullName, meta: [student.class?.name, student.section?.name].filter(Boolean).join(" ") }))}
                 staff={staff.map((member) => ({ id: member.id, name: member.fullName, meta: member.designation }))}
@@ -71,7 +76,7 @@ export default async function LeavesPage() {
                         <TD>{formatDate(leave.startDate)} to {formatDate(leave.endDate)}<p className="text-xs text-slate-500">{Number(leave.totalDays)} day(s)</p></TD>
                         <TD>{leave.leaveType}</TD>
                         <TD className="max-w-[240px]"><span className="line-clamp-2">{leave.reason}</span></TD>
-                        <TD className="text-right">{canManageLeaves ? <Dialog title={`Review ${leave.requesterName}`} description="Approve, reject, or cancel this leave request." triggerLabel="Review"><LeaveReviewForm leaveId={leave.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD>
+                        <TD className="text-right">{canApproveLeaves ? <Dialog title={`Review ${leave.requesterName}`} description="Approve, reject, or cancel this leave request." triggerLabel="Review"><LeaveReviewForm leaveId={leave.id} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD>
                       </tr>
                     ))}
                   </TBody>

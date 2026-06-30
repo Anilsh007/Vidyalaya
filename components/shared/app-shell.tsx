@@ -26,7 +26,6 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { logoutAction } from "@/lib/auth/actions";
 import { Button } from "@/components/ui/button";
 import { getVisibleModules } from "@/lib/modules/module-access";
 import { cn } from "@/lib/utils";
@@ -220,15 +219,13 @@ export function AppShell({
                 Profile Settings
               </Link>
 
-              <form action={logoutAction}>
-                <button
-                  type="submit"
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-rose-400 font-medium transition-colors hover:bg-rose-950/30 hover:text-rose-300 border-t border-slate-800/40"
-                >
-                  <LogOut className="h-4 w-4" />
-                  Sign Out
-                </button>
-              </form>
+              <Link
+                href="/logout"
+                className="flex w-full items-center gap-3 border-t border-slate-800/40 px-4 py-3 text-left text-sm font-medium text-rose-400 transition-colors hover:bg-rose-950/30 hover:text-rose-300"
+              >
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </Link>
             </div>
           </div>
         </aside>
@@ -287,15 +284,13 @@ export function AppShell({
                         Profile Settings
                       </Link>
 
-                      <form action={logoutAction}>
-                        <button
-                          type="submit"
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-rose-600 font-medium transition-colors hover:bg-rose-50/60"
-                        >
-                          <LogOut className="h-4 w-4" />
-                          Sign Out
-                        </button>
-                      </form>
+                      <Link
+                        href="/logout"
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50/60"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Sign Out
+                      </Link>
                     </div>
                   </div>
                 </div>

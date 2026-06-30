@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 
 import { requirePermission } from "@/lib/auth/access";
-import { recordAuditLog } from "@/lib/audit";
 import { type ActionFormState, initialActionFormState } from "@/lib/forms";
-import { PERMISSIONS } from "@/lib/permissions";
-import { reviewLeaveRequest, saveLeaveRequest } from "@/lib/services/leaves.service";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import { calculateLeaveDays, leaveRequestSchema, leaveReviewSchema } from "@/lib/validations/leaves";
+import { approveRequest, cancelRequest, createApprovalRequest, rejectRequest } from "@/lib/workflows/workflow.service";
+import { WORKFLOW_TYPES } from "@/lib/workflows/types";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "");
@@ -22,7 +22,7 @@ export async function saveLeaveRequestAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageLeaves);
+  const session = await requirePermission(RBAC_PERMISSIONS.leavesRequest);
   const parsed = leaveRequestSchema.safeParse({
     requesterType: getString(formData, "requesterType") || "STUDENT",
     studentId: getOptionalString(formData, "studentId"),
@@ -40,21 +40,24 @@ export async function saveLeaveRequestAction(
   const data = parsed.data;
 
   try {
-    const { leave, requesterName } = await saveLeaveRequest({
-      schoolId: session.schoolId,
+    const workflow = await createApprovalRequest({
+      workflowType: WORKFLOW_TYPES.LEAVE_REQUEST,
+      actor: session,
       requesterType: data.requesterType,
       studentId: data.studentId,
       staffId: data.staffId,
       leaveType: data.leaveType,
       startDate: data.startDate,
       endDate: data.endDate,
-      reason: data.reason,
-      totalDays: calculateLeaveDays(data.startDate, data.endDate)
+      reason: data.reason
     });
 
-    await recordAuditLog({ actorUserId: session.userId, schoolId: session.schoolId, action: "leave.request.created", entityType: "LeaveRequest", entityId: leave.id, metadata: { requesterName, leaveType: data.leaveType } });
     revalidatePath("/dashboard/leaves");
-    return { status: "success", message: "Leave request created." };
+    return {
+      status: "success",
+      message: "Leave request submitted for approval.",
+      meta: { leaveId: workflow.id, totalDays: calculateLeaveDays(data.startDate, data.endDate) }
+    };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "Unable to create leave request." };
   }
@@ -64,7 +67,7 @@ export async function reviewLeaveRequestAction(
   _prevState: ActionFormState = initialActionFormState,
   formData: FormData
 ): Promise<ActionFormState> {
-  const session = await requirePermission(PERMISSIONS.manageLeaves);
+  const session = await requirePermission(RBAC_PERMISSIONS.leavesApprove);
   const parsed = leaveReviewSchema.safeParse({
     leaveId: getString(formData, "leaveId"),
     status: getString(formData, "status"),
@@ -78,17 +81,23 @@ export async function reviewLeaveRequestAction(
   const data = parsed.data;
 
   try {
-    const leave = await reviewLeaveRequest({
-      schoolId: session.schoolId,
-      userId: session.userId,
-      leaveId: data.leaveId,
-      status: data.status,
-      reviewRemarks: data.reviewRemarks
-    });
+    const workflowInput = {
+      actor: session,
+      workflowType: WORKFLOW_TYPES.LEAVE_REQUEST,
+      targetId: data.leaveId,
+      remarks: data.reviewRemarks
+    } as const;
 
-    await recordAuditLog({ actorUserId: session.userId, schoolId: session.schoolId, action: "leave.request.reviewed", entityType: "LeaveRequest", entityId: leave.id, metadata: { status: data.status } });
+    if (data.status === "APPROVED") {
+      await approveRequest(workflowInput);
+    } else if (data.status === "REJECTED") {
+      await rejectRequest(workflowInput);
+    } else {
+      await cancelRequest(workflowInput);
+    }
+
     revalidatePath("/dashboard/leaves");
-    return { status: "success", message: "Leave request updated." };
+    return { status: "success", message: "Leave workflow updated." };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "Unable to update leave request." };
   }

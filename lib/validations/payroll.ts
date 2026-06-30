@@ -14,7 +14,8 @@ export const payrollSlipStatusSchema = z.object({
 
 export const payrollRunStatusSchema = z.object({
   payrollRunId: z.string().min(1, "Payroll run is required."),
-  status: z.enum(["FINALIZED", "PAID", "CANCELLED"])
+  status: z.enum(["FINALIZED", "PAID", "CANCELLED"]),
+  remarks: z.string().trim().max(500, "Remarks must be 500 characters or fewer.").optional()
 });
 
 export function parsePayrollPeriod(period: string) {

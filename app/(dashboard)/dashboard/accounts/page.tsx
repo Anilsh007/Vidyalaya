@@ -10,14 +10,16 @@ import { Dialog } from "@/components/ui/dialog";
 import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/access";
 import { fromMoney } from "@/lib/fees";
-import { PERMISSIONS } from "@/lib/permissions";
+import { RBAC_PERMISSIONS } from "@/lib/rbac/permissions";
 import { getAccountsPageData } from "@/lib/services/accounts.service";
 import { formatCurrency } from "@/lib/utils";
 import { getWorkspaceAccessCopy, resolveExperienceRole } from "@/lib/dashboard-experience";
 
 export default async function AccountsPage() {
-  const session = await requirePermission(PERMISSIONS.viewAccounts);
-  const canManageAccounts = session.permissions.includes(PERMISSIONS.manageAccounts);
+  const session = await requirePermission(RBAC_PERMISSIONS.accountsRead);
+  const canCreateVouchers = session.permissions.includes(RBAC_PERMISSIONS.accountsExpensesManage);
+  const canApproveVouchers = session.permissions.includes(RBAC_PERMISSIONS.accountsExpensesApprove);
+  const canManageCategories = session.permissions.includes(RBAC_PERMISSIONS.accountsExpensesManage);
   const accessCopy = getWorkspaceAccessCopy(resolveExperienceRole(session.roles), "accounts");
   const { categories, vouchers, activeCategories, draftVouchers, approvedVouchers, monthlyExpense, paidExpense } =
     await getAccountsPageData({ schoolId: session.schoolId });
@@ -39,16 +41,16 @@ export default async function AccountsPage() {
 
       <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
         <Card>
-          <CardHeader><CardTitle>{canManageAccounts ? "New expense voucher" : "Expense controls"}</CardTitle><p className="text-sm leading-6 text-slate-600">{canManageAccounts ? "Record bill, vendor, amount, payment mode, and expense category." : accessCopy.summary}</p></CardHeader>
-          <CardContent>{canManageAccounts ? <ExpenseVoucherForm categories={activeCategories.map((category) => ({ id: category.id, code: category.code, name: category.name }))} /> : <EmptyState title={accessCopy.title} description={accessCopy.description} />}</CardContent>
+          <CardHeader><CardTitle>{canCreateVouchers ? "New expense voucher" : "Expense controls"}</CardTitle><p className="text-sm leading-6 text-slate-600">{canCreateVouchers ? "Record bill, vendor, amount, payment mode, and expense category." : accessCopy.summary}</p></CardHeader>
+          <CardContent>{canCreateVouchers ? <ExpenseVoucherForm categories={activeCategories.map((category) => ({ id: category.id, code: category.code, name: category.name }))} /> : <EmptyState title={accessCopy.title} description={accessCopy.description} />}</CardContent>
         </Card>
 
         <Card>
           <CardHeader><CardTitle>Expense categories</CardTitle><p className="text-sm leading-6 text-slate-600">Maintain reusable heads such as utilities, repairs, supplies, events, and maintenance.</p></CardHeader>
           <CardContent className="grid gap-5">
-            {canManageAccounts ? <ExpenseCategoryForm /> : null}
+            {canManageCategories ? <ExpenseCategoryForm /> : null}
             {categories.length ? (
-              <TableFrame><Table><THead><tr><TH>Code</TH><TH>Name</TH><TH>Status</TH><TH className="text-right">Action</TH></tr></THead><TBody>{categories.map((category) => (<tr key={category.id}><TD>{category.code}</TD><TD><div className="grid gap-1"><span className="font-medium text-slate-950">{category.name}</span><span className="text-xs text-slate-500">{category.description ?? "No description"}</span></div></TD><TD><StatusBadge status={category.isActive ? "ACTIVE" : "INACTIVE"} toneMap={{ ACTIVE: "bg-emerald-50 text-emerald-700", INACTIVE: "bg-red-50 text-red-700" }} /></TD><TD className="text-right">{canManageAccounts ? <Dialog title={`Edit ${category.name}`} description="Update category label and active status." triggerLabel="Edit"><ExpenseCategoryForm defaultValues={category} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD></tr>))}</TBody></Table></TableFrame>
+              <TableFrame><Table><THead><tr><TH>Code</TH><TH>Name</TH><TH>Status</TH><TH className="text-right">Action</TH></tr></THead><TBody>{categories.map((category) => (<tr key={category.id}><TD>{category.code}</TD><TD><div className="grid gap-1"><span className="font-medium text-slate-950">{category.name}</span><span className="text-xs text-slate-500">{category.description ?? "No description"}</span></div></TD><TD><StatusBadge status={category.isActive ? "ACTIVE" : "INACTIVE"} toneMap={{ ACTIVE: "bg-emerald-50 text-emerald-700", INACTIVE: "bg-red-50 text-red-700" }} /></TD><TD className="text-right">{canManageCategories ? <Dialog title={`Edit ${category.name}`} description="Update category label and active status." triggerLabel="Edit"><ExpenseCategoryForm defaultValues={category} /></Dialog> : <span className="text-sm text-slate-500">View only</span>}</TD></tr>))}</TBody></Table></TableFrame>
             ) : <EmptyState title="No categories" description="Create an expense category before recording vouchers." />}
           </CardContent>
         </Card>
@@ -56,12 +58,12 @@ export default async function AccountsPage() {
 
       <Card>
         <CardHeader><CardTitle>Approval queue</CardTitle><p className="text-sm leading-6 text-slate-600">Draft and approved vouchers that need accounting action.</p></CardHeader>
-        <CardContent>{draftVouchers.length || approvedVouchers.length ? <VoucherTable vouchers={[...draftVouchers, ...approvedVouchers]} canManage={canManageAccounts} /> : <EmptyState title="No pending vouchers" description="All recent expense vouchers are either paid or cancelled." />}</CardContent>
+        <CardContent>{draftVouchers.length || approvedVouchers.length ? <VoucherTable vouchers={[...draftVouchers, ...approvedVouchers]} canManage={canApproveVouchers} /> : <EmptyState title="No pending vouchers" description="All recent expense vouchers are either paid or cancelled." />}</CardContent>
       </Card>
 
       <Card>
         <CardHeader><CardTitle>Expense register</CardTitle><p className="text-sm leading-6 text-slate-600">Recent voucher history with category, paid-to details, amount, status, and payment references.</p></CardHeader>
-        <CardContent>{vouchers.length ? <VoucherTable vouchers={vouchers} canManage={canManageAccounts} /> : <EmptyState title="No expense vouchers" description="Create the first expense voucher to start accounting records." />}</CardContent>
+        <CardContent>{vouchers.length ? <VoucherTable vouchers={vouchers} canManage={canApproveVouchers} /> : <EmptyState title="No expense vouchers" description="Create the first expense voucher to start accounting records." />}</CardContent>
       </Card>
 
       <section className="grid gap-4 lg:grid-cols-3">

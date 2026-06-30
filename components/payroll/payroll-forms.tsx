@@ -68,13 +68,16 @@ export function PayrollRunStatusForm({ payrollRunId }: { payrollRunId: string })
       <div className="grid gap-2">
         <FormField label="Run status" htmlFor={`run-status-${payrollRunId}`}>
           <Select id={`run-status-${payrollRunId}`} name="status" defaultValue="FINALIZED">
-            <option value="FINALIZED">Finalize payroll</option>
+            <option value="FINALIZED">Approve payroll run</option>
             <option value="PAID">Mark run paid</option>
-            <option value="CANCELLED">Cancel run</option>
+            <option value="CANCELLED">Reject payroll run</option>
           </Select>
         </FormField>
         <FieldError error={state.fieldErrors?.status} />
       </div>
+      <FormField label="Remarks" htmlFor={`run-remarks-${payrollRunId}`}>
+        <Textarea id={`run-remarks-${payrollRunId}`} name="remarks" className="min-h-[90px]" placeholder="Optional approval or rejection remarks" />
+      </FormField>
       <div className="flex justify-end"><SubmitButton pendingLabel="Updating run...">Update payroll run</SubmitButton></div>
       <FormStateMessage state={state} />
     </form>

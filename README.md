@@ -1,5 +1,16 @@
 # Vidyalaya Self-Hosted Setup
 
+## Documentation map
+
+- Local and LAN installation: [docs/LOCAL_LAN_INSTALL.md](docs/LOCAL_LAN_INSTALL.md)
+- Production and pilot checklist: [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md)
+- Full engineering plan and phase notes: [docs/ERP_DEVELOPMENT_PLAN.md](docs/ERP_DEVELOPMENT_PLAN.md)
+
+Seed policy reminder:
+
+- bootstrap roles, permissions, and admin are seeded
+- fake ERP business data is not seeded by default
+
 Vidyalaya is designed to run on the school's own computer or server. It does not require paid hosting. A school can use it on one office PC, on a small local server, or across the school LAN.
 
 This guide is written for non-technical school setup where possible.

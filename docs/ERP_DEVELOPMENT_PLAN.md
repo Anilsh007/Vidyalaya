@@ -1583,6 +1583,1000 @@ Safe local fix before retry:
 
 Phase 6 can start after approval.
 
+## Phase 10 - Final Cleanup, Tests, and LAN Install Readiness
+
+### Final audit result
+
+- runtime app, components, services, Prisma seed, and docs were re-audited for release readiness
+- no active fake or demo ERP business data remains in runtime code paths
+- current module visibility remains aligned with centralized module config
+- hidden modules remain hidden: `health`, `reception`, `maintenance`, `security`
+- beta modules remain documented and intentionally not promoted to active during cleanup
+
+### Cleanup performed
+
+- added dedicated local/LAN installation documentation
+- added a production and pilot release checklist
+- added dev-only RBAC verification script
+- added dev-only routing access verification script
+- fixed route-access specificity so `/dashboard` permission does not incorrectly unlock more specific dashboard child routes
+- updated report verification script to use configured `APP_URL` instead of a hardcoded local URL
+- updated package scripts to expose verification commands cleanly
+- tightened `.env.example` placeholders for stronger release defaults
+- added README documentation links instead of introducing another large setup rewrite
+
+### Lint status
+
+- lint was re-run during Phase 10 and still has a pre-existing backlog
+- current lint backlog is broad and includes unrelated older files such as server-action unused params, `postcss.config.js`, `public/sw.js`, and scattered unused imports
+- no risky mass-refactor was done only to satisfy lint
+
+### Tests and verification scripts
+
+- added `scripts/dev/verify-rbac.ts`
+- added `scripts/dev/verify-routing-access.ts`
+- retained existing dev-only scripts:
+  - `scripts/dev/verify-phase-8a1-workflows.ts`
+  - `scripts/dev/verify-phase-9a-reports.ts`
+- package scripts now include:
+  - `verify:rbac`
+  - `verify:routing`
+  - `verify:reports`
+  - `verify:workflows`
+
+### Final seed policy confirmation
+
+- `prisma/seed.ts` remains production-safe
+- roles, permissions, role-permission mappings, bootstrap school, academic year, and bootstrap admin are seeded
+- fake students, staff, attendance, fees, exams, notices, library, inventory, payroll, hostel, transport, and expense records are not seeded
+- `ALLOW_DEMO_SEED=true` still does not inject demo business records
+
+### Local/LAN install readiness
+
+- created `docs/LOCAL_LAN_INSTALL.md`
+- documented:
+  - localhost install
+  - LAN IP install
+  - LAN hostname install
+  - optional HTTPS install
+  - cookie behavior based on `APP_URL`
+  - migration, generate, and seed commands
+  - LAN employee access expectations
+  - backup and troubleshooting notes
+
+### Production checklist
+
+- created `docs/PRODUCTION_CHECKLIST.md`
+- checklist covers:
+  - environment review
+  - Prisma readiness
+  - build/start verification
+  - RBAC and portal scope checks
+  - workflow/report checks
+  - backup expectations
+  - beta/hidden module review
+
+### Module status final review
+
+- active:
+  - `dashboard`
+  - `students`
+  - `staff`
+  - `attendance`
+  - `fees`
+  - `exams`
+  - `documents`
+  - `notices`
+  - `reports`
+  - `users`
+  - `settings`
+  - `audit`
+  - `student-portal`
+  - `parent-portal`
+- beta:
+  - `library`
+  - `inventory`
+  - `transport`
+  - `hostel`
+  - `leaves`
+  - `payroll`
+  - `accounts`
+- hidden:
+  - `health`
+  - `reception`
+  - `maintenance`
+  - `security`
+
+### Final security review
+
+- proxy-based route entry protection remains active for dashboard routes
+- auth session remains local/LAN-safe with `APP_URL` protocol-based cookie security
+- logout fix remains in place
+- forbidden route recovery remains non-looping
+- no broad ADMIN fallback was reintroduced
+- no client-submitted `schoolId` trust issues were introduced during Phase 10
+
+### Staff report decision
+
+- kept staff report/export out of the active allowlisted report set for this release pass
+- documented as a known remaining limitation instead of implementing a late risky report change
+
+### Remaining limitations
+
+- lint backlog remains and should be handled in a focused cleanup pass, not mixed with release hardening
+- staff report/export is still pending as an explicitly documented gap
+- beta modules are functional foundations but not all are final end-user-ready
+- hidden modules still require scoped routes and UI before activation
+- Prisma Windows DLL lock can still require `taskkill /F /IM node.exe` before `prisma generate`
+
+### Pilot readiness
+
+- app is ready for a controlled local/LAN pilot release with the current active module set
+- pilot release should exclude unfinished beta workflows from business-critical dependency until each school validates them operationally
+
+## Phase 9 - Reports, Analytics, and Role-wise Dashboard Polish
+
+### Dashboard and reports audit result
+
+Files audited in this phase:
+
+- `app/(dashboard)/dashboard/page.tsx`
+- `app/(dashboard)/dashboard/reports/page.tsx`
+- `app/api/reports/export/[reportType]/route.ts`
+- `lib/services/dashboard.service.ts`
+- `lib/services/reports.service.ts`
+- `lib/report-queries.ts`
+- `lib/validations/reports.ts`
+- `lib/rbac/scope.ts`
+- `lib/rbac/permissions.ts`
+- `lib/modules/module-config.ts`
+
+Key findings:
+
+- The main dashboard was already DB-driven for metrics, charts, notices, and activity.
+- No fake dashboard metric arrays or fake chart payloads were found in the touched runtime files.
+- The reports page was still too permissive and duplicated access logic:
+  - it loaded all report datasets before role-specific filtering
+  - export gating only checked broad `reports.export`
+  - report visibility was not centralized by report type
+- Export route hardening was incomplete because report-type allowlisting and report-specific access decisions were not fully centralized.
+
+### Dashboard service status
+
+`lib/services/dashboard.service.ts` remains the central DB-backed source for:
+
+- role-wise dashboard metrics
+- chart datasets
+- recent activity/alert feed
+- notice visibility for the homepage
+
+Role dashboards remain scoped and DB-backed for:
+
+- admin / super admin
+- principal / director
+- teacher / HOD / exam controller
+- accountant / finance
+- student
+- parent
+- librarian
+- transport manager
+- hostel warden
+- HR / inventory / front desk fallback profiles
+
+Important:
+
+- no fake chart data was introduced
+- empty datasets continue to render empty chart states
+- recent activity continues to come from live audit-log and notice records only
+
+### Reports service changes
+
+`lib/services/reports.service.ts` was rewritten into a centralized, scoped report-access service.
+
+Added/centralized:
+
+- report type registry: `student`, `attendance`, `fees`, `dues`, `results`
+- typed report definitions
+- viewer-aware report access checks
+- viewer-aware export access checks
+- centralized report assertions:
+  - `assertCanAccessReport(...)`
+- centralized report discovery:
+  - `getAvailableReportDefinitions(...)`
+- centralized generic row loader:
+  - `getReportRows(...)`
+- centralized scoped meta loader:
+  - `getReportsPageMeta(viewer)`
+
+Scope handling now explicitly supports:
+
+- full school-wide reporting for allowed leadership/operations roles
+- own-student-only reporting for `STUDENT`
+- linked-children-only reporting for `PARENT`
+- assigned class/section reporting for `TEACHER`, `HOD`, and `EXAM_CONTROLLER`
+- deny/empty-by-default behavior when scope cannot be verified
+
+### Reports page changes
+
+`app/(dashboard)/dashboard/reports/page.tsx` now:
+
+- derives visible report sections from centralized report definitions
+- only loads datasets for report types the current session can actually read
+- only renders export actions when the session can export that report type
+- records `report.viewed` with visible report keys and active filters
+- shows an empty state when the active role has no report sections available
+
+This removed the earlier behavior where the page preloaded all report datasets regardless of role visibility.
+
+### Export hardening result
+
+`app/api/reports/export/[reportType]/route.ts` is now hardened to:
+
+- require an authenticated session
+- validate `reportType` against an allowlist
+- validate report filters with centralized schema
+- require report-specific export access through `assertCanAccessReport(session, type, "export")`
+- scope all report rows by session `schoolId`
+- audit `report.exported`
+- block unknown report types with `404`
+- block forbidden exports with `403` JSON response
+
+This removed the earlier gap where broad export permission could expose report types without a centralized report-specific access decision.
+
+### Static/fake data findings
+
+Static-data search was re-run across touched dashboard/report files with keywords:
+
+- `mock`
+- `demo`
+- `sample`
+- `fake`
+- `static`
+- `chartData`
+- `dashboardStats`
+- `recentActivities`
+- `placeholder`
+
+Result:
+
+- no fake runtime business data remained in the touched dashboard/report files
+- remaining `placeholder` matches were UI input placeholders only, which are allowed
+
+### Performance and query cleanup
+
+Safe cleanup completed:
+
+- report visibility is resolved once and reused by the reports page
+- report page only fetches visible report datasets
+- report query logic is centralized in one service instead of being spread between page and export route
+- scoped meta loading for classes, sections, and exams is centralized
+
+No risky query rewrite was done in untouched modules.
+
+### Manual verification result
+
+Manual/browser verification for report exports and role-specific dashboard rendering was not re-run end-to-end in this turn after the service rewrite.
+
+What was verified in this phase:
+
+- dashboard/report code paths compile successfully
+- `next build` includes:
+  - `/dashboard`
+  - `/dashboard/reports`
+  - `/api/reports/export/[reportType]`
+- report route protection and export allowlisting are now centralized in code
+
+What remains pending for a future browser pass:
+
+- admin export smoke test from `/dashboard/reports`
+- teacher scoped report visibility smoke test
+- student/parent forbidden export smoke test
+- accountant finance report/export smoke test
+
+### Commands run
+
+From `C:\\Dashboard\\school-erp`:
+
+- `.\node_modules\.bin\prisma.cmd validate`
+- `.\node_modules\.bin\prisma.cmd generate`
+- `.\node_modules\.bin\tsc.cmd --noEmit --incremental false`
+- `.\node_modules\.bin\next.cmd build`
+- `taskkill /F /IM node.exe` (needed only to clear Prisma Windows file lock before regenerate)
+
+Results:
+
+- Prisma validate: passed
+- Prisma generate: initially failed with Windows `EPERM` lock on `query_engine-windows.dll.node`, then passed after stopping stale `node.exe` processes
+- TypeScript: passed
+- Next build: passed
+
+### Remaining risks before Phase 10
+
+- Browser-level multi-persona report/export verification is still pending after the centralized report service rewrite.
+- `lib/report-queries.ts` is now only a thin compatibility re-export layer and should be removed later if no runtime imports remain.
+- Some dashboard copy still contains legacy mojibake text fragments such as `Â·` or `â€™`; these are cosmetic, not data-integrity issues.
+
+### Phase 9 status
+
+- dashboard metrics remain DB-backed
+- dashboard charts remain DB-backed or empty-state backed
+- recent activity remains DB-backed
+- report queries are centralized and role-scoped
+- export route is allowlisted, school-scoped, and audited
+- no fake/static/demo business data was added
+
+Phase 10 can start after approval.
+
+## Phase 9A - Reports and Export Runtime Smoke Verification
+
+### Personas tested
+
+Runtime verification used these real local accounts:
+
+- `admin@school.local`
+- `qa.leave.teacher@school.local`
+- `student.portal@school.local`
+- `parent@school.local`
+- `accountant@school.local`
+
+Verification method:
+
+- browser login + page inspection for the admin flow
+- signed real session cookies created from live DB users for scoped HTTP/runtime export checks
+- no fake/default production seed data was added
+- no cross-school bypass or client-side permission spoofing was used
+
+### Admin report/export verification
+
+Verified:
+
+- `/dashboard/reports` opens for admin
+- visible report sections include:
+  - student
+  - attendance
+  - fee collection
+  - pending dues
+  - exam results
+- CSV export works for:
+  - `/api/reports/export/student`
+  - `/api/reports/export/attendance`
+  - `/api/reports/export/fees`
+- export responses return:
+  - `200`
+  - `text/csv; charset=utf-8`
+  - attachment filenames such as `student-report.csv`
+- exported CSV rows were real DB-backed rows only
+- no fake report rows were introduced
+
+Current note:
+
+- `staff` is not yet an allowlisted report type in the centralized report service, so there is no active staff CSV export in the current Phase 9 build
+
+### Teacher scoped verification
+
+Verified for `qa.leave.teacher@school.local`:
+
+- direct export attempts for:
+  - `/api/reports/export/fees`
+  - `/api/reports/export/student`
+  - `/api/reports/export/attendance`
+  all returned `403`
+- response body correctly returned:
+  - `{"error":"You do not have permission to access this report."}`
+
+Route behavior:
+
+- direct `/dashboard/reports` access no longer exposes report sections
+- returned HTML contains a forbidden-route hint rather than report content
+- no all-school report fallback was exposed
+
+### Student restriction verification
+
+Verified for `student.portal@school.local`:
+
+- `/api/reports/export/student` -> `403`
+- `/api/reports/export/fees` -> `403`
+- no student-accessible admin report export remained
+- `/dashboard/reports` no longer exposed student/fees report sections
+- restricted route HTML resolves to forbidden-route handling rather than report content
+
+### Parent restriction verification
+
+Verified for `parent@school.local`:
+
+- `/api/reports/export/student` -> `403`
+- `/api/reports/export/fees` -> `403`
+- no unrelated student export path was exposed
+- `/dashboard/reports` no longer exposed report sections
+- restricted route HTML resolves to forbidden-route handling rather than live report content
+
+### Accountant finance export verification
+
+Verified for `accountant@school.local`:
+
+- `/dashboard/reports` remains accessible
+- finance report section visibility remains present
+- `/api/reports/export/fees` -> `200` CSV
+- `/api/reports/export/results` -> `403`
+
+This confirms accountant export is now limited to finance scope instead of leaking academic result exports.
+
+### Invalid report type verification
+
+Verified:
+
+- `/api/reports/export/unknown` -> `404` JSON
+- `/api/reports/export/users` -> `404` JSON
+- `/api/reports/export/%2e%2e` -> `308` redirect to `/api/reports`
+- `/api/reports/export/../../students` -> `404`
+
+Result:
+
+- unknown or disallowed report types are rejected
+- no arbitrary model access was exposed
+- no path traversal issue was observed in the allowlisted route handler
+
+### Audit log verification
+
+Verified live audit records for:
+
+- successful exports:
+  - `report.exported`
+- blocked export attempts:
+  - `auth.api.forbidden`
+
+Audit evidence captured:
+
+- actor email
+- schoolId
+- report type in metadata
+- row count in successful export metadata
+- timestamp
+
+Examples verified:
+
+- `admin@school.local` exported `student`, `attendance`, and `fees`
+- `accountant@school.local` exported `fees`
+- `qa.leave.teacher@school.local`, `student.portal@school.local`, and `parent@school.local` produced `auth.api.forbidden` entries on blocked exports
+- `accountant@school.local` produced `auth.api.forbidden` for blocked `results` export after the fix
+
+### Bugs found and fixed
+
+One real security-policy bug was found during runtime verification:
+
+- report visibility and export eligibility in `lib/services/reports.service.ts` used an overly broad `hasAnyPermission(...)` model
+- this allowed finance roles to inherit unrelated academic report/export access if they had any one matching read permission
+
+Fix applied:
+
+- report access is now evaluated as:
+  - required baseline permissions with `hasAllPermissions(...)`
+  - plus scoped `requiredReadAnyPermissions` for the underlying module read access
+- report category permissions are now enforced explicitly:
+  - student/results require `reports.academic`
+  - attendance requires `reports.attendance`
+  - fees/dues require `reports.finance`
+
+Runtime result after fix:
+
+- accountant can export fees
+- accountant cannot export results
+- teacher/student/parent cannot export restricted reports
+
+### Commands run
+
+From `C:\\Dashboard\\school-erp`:
+
+- `taskkill /F /IM node.exe`
+- `.\node_modules\.bin\prisma.cmd validate`
+- `.\node_modules\.bin\prisma.cmd generate`
+- `.\node_modules\.bin\tsc.cmd --noEmit --incremental false`
+- `.\node_modules\.bin\next.cmd build`
+- `node .next/standalone/server.js`
+- `.\node_modules\.bin\tsx.cmd .\scripts\dev\verify-phase-9a-reports.ts`
+
+Results:
+
+- Prisma validate: passed
+- Prisma generate: passed
+- TypeScript: passed
+- Next build: passed
+- standalone runtime verification: completed
+- report/export verification helper: completed
+
+### Remaining risks before Phase 10
+
+- browser-click verification for all restricted personas was not completed because known browser login credentials were only confirmed for admin in this turn; the scoped HTTP/runtime verification covered the protected routes and export endpoints directly
+- `staff` report/export is still not implemented as an active allowlisted report type
+- restricted app-route responses render as normal HTML with forbidden-route hints instead of a transport-level `403`, which is acceptable for app-page redirects but should be kept in mind during future QA
+
+### Phase 9A status
+
+- admin report export: verified
+- teacher unauthorized export blocking: verified
+- student unauthorized export blocking: verified
+- parent unauthorized export blocking: verified
+- accountant finance-only export scope: verified
+- invalid report type handling: verified
+- export audit logs: verified
+
+Phase 10 can start after approval.
+
+## Phase 8 - Centralized Approval Workflow Engine
+
+### Approval-like flows audited
+
+Reviewed current approval and status-driven flows across:
+
+- `app/(dashboard)/dashboard/leaves`
+- `app/(dashboard)/dashboard/accounts`
+- `app/(dashboard)/dashboard/payroll`
+- `app/(dashboard)/dashboard/fees`
+- `app/(dashboard)/dashboard/exams`
+- `lib/services/*`
+- `lib/validations/*`
+- `lib/rbac/*`
+- `prisma/schema.prisma`
+
+Safe current workflow-backed candidates:
+
+- leave request review
+- expense voucher approval
+- payroll run approval
+
+Documented but not workflow-backed yet:
+
+- fee concession
+- fee refund
+- result publish
+- inventory purchase approval
+- student transfer approval
+
+### Workflow foundation added
+
+Added centralized workflow files:
+
+- `lib/workflows/types.ts`
+- `lib/workflows/workflow-config.ts`
+- `lib/workflows/status.ts`
+- `lib/workflows/workflow.validation.ts`
+- `lib/workflows/workflow.service.ts`
+
+Centralized capabilities now include:
+
+- workflow type registry
+- centralized permission mapping
+- centralized request/approve/reject/complete flow
+- centralized transition validation
+- centralized workflow lookup/list normalization
+- centralized audit event emission for workflow actions
+
+### Schema and migration status
+
+No Prisma schema or migration changes were required for Phase 8.
+
+Decision:
+
+- use existing module status fields and wrap them with centralized workflow service
+- avoid adding a generic `ApprovalRequest` table at this stage to keep Phase 8 low-risk and build-safe
+
+Current module status fields used:
+
+- `LeaveRequest.status`
+- `ExpenseVoucher.status`
+- `PayrollRun.status`
+
+### Centralized status handling
+
+Added centralized transition rules:
+
+- Leave:
+  - `PENDING -> APPROVED | REJECTED | CANCELLED`
+- Expense voucher:
+  - `DRAFT -> APPROVED | CANCELLED`
+  - `APPROVED -> PAID`
+- Payroll run:
+  - `DRAFT -> FINALIZED`
+  - `DRAFT -> CANCELLED`
+  - `FINALIZED -> PAID`
+
+Generic workflow display normalization now maps:
+
+- expense `PAID -> COMPLETED`
+- payroll `FINALIZED -> APPROVED`
+- payroll `PAID -> COMPLETED`
+
+### Leave workflow result
+
+Leaves are now routed through the centralized workflow engine.
+
+Updated:
+
+- `app/(dashboard)/dashboard/leaves/actions.ts`
+- `app/(dashboard)/dashboard/leaves/page.tsx`
+
+Behavior:
+
+- create request uses `leaves.request`
+- approve/reject/cancel uses `leaves.approve`
+- page visibility separates request vs approval capability
+- workflow actions are audited centrally
+
+### Expense workflow result
+
+Expense vouchers are now routed through the centralized workflow engine.
+
+Updated:
+
+- `app/(dashboard)/dashboard/accounts/actions.ts`
+- `app/(dashboard)/dashboard/accounts/page.tsx`
+- `components/accounts/account-forms.tsx`
+- `lib/validations/accounts.ts`
+
+Behavior:
+
+- voucher creation uses `accounts.expenses.manage`
+- approval / reject / mark paid uses `accounts.expenses.approve`
+- category management stays separate from approval actions
+- rejection is currently stored as `CANCELLED` because the existing schema does not have an expense `REJECTED` enum value
+- remarks are supported on voucher decisions
+
+### Payroll workflow result
+
+Payroll runs are now routed through the centralized workflow engine.
+
+Updated:
+
+- `app/(dashboard)/dashboard/payroll/actions.ts`
+- `app/(dashboard)/dashboard/payroll/page.tsx`
+- `components/payroll/payroll-forms.tsx`
+- `lib/validations/payroll.ts`
+
+Behavior:
+
+- payroll run creation uses `payroll.run`
+- payroll run approve / reject / mark paid uses `payroll.approve`
+- payroll run decision remarks are now supported
+- payroll slip status updates remain module-specific for now and are still audit-logged
+
+### Pending workflow areas
+
+Not implemented yet because the current repo does not have a safe existing approval flow to centralize without inventing business data or speculative schema:
+
+- fee concession workflow
+- fee refund workflow
+- result publish approval workflow
+- inventory purchase approval workflow
+- student transfer approval workflow
+
+These remain documented Phase 8 follow-up items for a future schema/workflow expansion.
+
+### Audit logging result
+
+Workflow actions now audit centrally through `lib/workflows/workflow.service.ts` using the existing audit log pipe.
+
+Audit events now emitted centrally include:
+
+- `leave.requested`
+- `leave.approve`
+- `leave.reject`
+- `leave.cancel`
+- `expense.requested`
+- `expense.approve`
+- `expense.reject`
+- `expense.complete`
+- `payroll.run.requested`
+- `payroll.run.approve`
+- `payroll.run.reject`
+- `payroll.run.complete`
+
+### Manual verification status
+
+Full browser workflow verification is still pending for this phase.
+
+Reason:
+
+- no fresh dedicated requester/approver walkthrough was executed after the Phase 8 refactor in this environment
+
+Manual checks required before Phase 9:
+
+1. create a leave request with a requester-capable role
+2. approve/reject that leave with a leave approver role
+3. create an expense voucher with an accounts manager role
+4. approve/reject/pay the voucher with an expense approver role
+5. create a payroll run with a payroll-run role
+6. approve/reject/pay the run with a payroll approver role
+7. confirm unauthorized users receive forbidden/denied behavior
+
+### Commands run
+
+From `C:\\Dashboard\\school-erp`:
+
+- `.\node_modules\.bin\prisma.cmd validate`
+- `.\node_modules\.bin\prisma.cmd generate`
+- `.\node_modules\.bin\tsc.cmd --noEmit --incremental false`
+- `.\node_modules\.bin\next.cmd build`
+- `taskkill /F /IM node.exe`
+- `.\node_modules\.bin\prisma.cmd generate` (retry after Windows lock)
+
+### Command results
+
+- Prisma validate: passed
+- Prisma generate: passed after clearing stale Node lock
+- TypeScript: passed
+- Next build: passed
+
+### Remaining risks before Phase 9
+
+- expense rejection currently maps to `CANCELLED` because the schema has no `REJECTED` state for vouchers
+- payroll slip approval is still module-specific and not yet part of the centralized workflow engine
+- fee concession, refund, result publish, inventory purchase, and student transfer workflows still need explicit model-backed implementation
+- manual browser verification is still required for requester vs approver personas
+
+### Phase 8 status
+
+- workflow logic centralized: yes
+- leave workflow centralized: yes
+- expense workflow centralized: yes
+- payroll run workflow centralized: yes
+- schema migration required: no
+- build/type/prisma status: green
+
+Phase 9 can start after approval and after manual requester/approver workflow verification is completed.
+
+## Phase 7A - Attendance Date Runtime Fix Cleanup and Verification
+
+### Runtime error root cause
+
+Attendance filtering accepted raw query-string values for `date` and `month`, then passed derived bounds into Prisma without guaranteed normalization.
+
+This allowed invalid inputs such as:
+
+- empty `month`
+- malformed `month`
+- out-of-range `month` values
+- malformed `date`
+
+to produce invalid or unintended `Date` objects before query execution.
+
+The observed production-risk symptom was:
+
+- `Invalid value for argument gte: Provided Date object is invalid`
+
+### Immediate fix confirmed
+
+The crash-prevention fallback that had already been added was preserved, then cleaned into a centralized helper flow so Prisma no longer receives unsafe date bounds.
+
+### Date helper cleanup done
+
+Shared attendance helpers in `lib/attendance.ts` were extended with centralized safe normalization:
+
+- `isValidDate(...)`
+- `getSafeDateInput(...)`
+- `getSafeMonthInput(...)`
+- `getSafeDayBounds(...)`
+- `getSafeMonthBounds(...)`
+- `attendanceFiltersSchema`
+
+Behavior now:
+
+- empty date -> today
+- invalid date -> today
+- empty month -> current month
+- invalid month -> current month
+- legacy `month=6&year=2026` format -> normalized to `2026-06`
+- out-of-range `month=13&year=2026` -> fallback to current month
+
+The helper now also validates normalized output against the generated `Date`:
+
+- invalid overflow values like `2026-13` no longer survive as silently shifted real dates
+- malformed dates cannot propagate into Prisma range filters
+
+### Teacher scope duplicate-call cleanup done
+
+`lib/services/attendance.service.ts` now computes teacher scope once per page-data load:
+
+- detects teacher-scoped roles once
+- resolves `teacherScope` once
+- reuses the same result for class filtering
+- reuses the same result for section filtering
+- reuses the same scoped result in student filtering
+
+This keeps teacher, HOD, and exam-controller access restrictive without repeated scope resolution or broad fallbacks.
+
+### Attendance service cleanup done
+
+Attendance service now uses the centralized safe helpers for all touched date paths:
+
+- page-level selected date
+- page-level selected month
+- day query bounds
+- month query bounds
+- attendance sheet save bounds
+
+As a result:
+
+- no attendance Prisma query should receive `Invalid Date`
+- invalid inputs normalize before query construction
+- save flow also avoids invalid date persistence
+
+### Runtime route verification result
+
+Live browser verification was performed against the running local app on `http://localhost:3000`.
+
+Verified routes:
+
+- `/dashboard`
+- `/dashboard/attendance`
+- `/dashboard/attendance?month=6&year=2026`
+- `/dashboard/attendance?month=&year=`
+- `/dashboard/attendance?month=abc&year=xyz`
+- `/dashboard/attendance?month=13&year=2026`
+- `/dashboard/attendance?month=2026-06`
+- `/dashboard/attendance?month=invalid`
+
+Observed result:
+
+- dashboard opened without the attendance Prisma date crash
+- attendance page opened successfully for all tested routes
+- invalid month values fell back safely
+- no Prisma invalid-date error text appeared
+- no generic runtime error page appeared
+
+Observed normalized UI values:
+
+- date input resolved to `2026-06-29`
+- month input resolved to `2026-06`
+- legacy `month=6&year=2026` normalized correctly to `2026-06`
+- invalid `month=13&year=2026` now falls back safely to `2026-06`
+
+### Commands run
+
+From `C:\\Dashboard\\school-erp`:
+
+- `.\node_modules\.bin\prisma.cmd validate`
+- `.\node_modules\.bin\prisma.cmd generate`
+- `.\node_modules\.bin\tsc.cmd --noEmit --incremental false`
+- `.\node_modules\.bin\next.cmd build`
+- `taskkill /F /IM node.exe` (used only after Prisma generate hit the expected Windows file lock)
+
+### Command results
+
+- Prisma validate: passed
+- Prisma generate: passed after clearing the Windows query-engine file lock
+- TypeScript: passed
+- Next build: passed
+
+### Remaining risks
+
+- this phase verified admin-side attendance route stability, not every persona-specific attendance workflow in the browser
+- Windows Prisma client generation can still require `taskkill /F /IM node.exe` when the local query engine file is locked by a running Node process
+- attendance filter validation is now centralized, but any future new date-based attendance entry points should reuse the same helper path instead of introducing raw `Date` construction
+
+### Phase 7A status
+
+- duplicate teacher-scope resolution cleaned
+- attendance date and month safety centralized
+- invalid month and date routes verified live
+- Prisma invalid-date crash no longer reproduced
+
+Phase 8 can start after approval.
+
+## Phase 8A-1 - Logout / Persona Switching Fix and Workflow Verification Resume
+
+### Logout root cause and fix
+
+- The profile-menu sign-out used a client-rendered server action form in `components/shared/app-shell.tsx`.
+- During local browser automation this was unreliable and could submit before hydration or land on an unexpected route, which made persona switching flaky.
+- Added a dedicated fallback route at `app/logout/route.ts`.
+- Updated both desktop and mobile sign-out entries in `components/shared/app-shell.tsx` to navigate to `/logout` instead of relying on the inline server-action form.
+- The new logout route:
+  - records `auth.logout` when a session exists
+  - clears the same session cookie used by login/proxy
+  - redirects back to `/login`
+  - preserves the requested host from headers so local verification can stay on `127.0.0.1` instead of bouncing to `localhost`
+
+### Production-mode verification runtime used
+
+- Dev runtime was not reused for workflow verification because earlier turns hit stale server-action mismatch issues.
+- Stable verification runtime used for this phase:
+  - build first
+  - then `node .next/standalone/server.js` with `HOSTNAME=127.0.0.1` and `PORT=3200`
+- This standalone runtime preserved login sessions correctly during cross-route verification, unlike the temporary `next start` runs on mixed hostnames.
+
+### QA personas used
+
+- Existing bootstrap admin:
+  - `admin@school.local`
+- Local manual QA users created through the Users UI:
+  - `qa.leave.teacher@school.local`
+  - `qa.workflow.accountant@school.local`
+  - `qa.unauth.peon@school.local`
+- These are local verification accounts only. They are not part of `prisma/seed.ts`.
+
+### Manual/browser verification completed
+
+- Logout verification:
+  - `/logout` successfully cleared the active session
+  - after logout, `/dashboard` redirected to `/login`
+- Teacher requester verification:
+  - logged in as `qa.leave.teacher@school.local`
+  - opened `/dashboard/leaves`
+  - submitted a real staff leave request from the browser UI
+  - request appeared in the pending register with `PENDING`
+  - teacher-side action cell showed `View only`, confirming requester could not self-approve from the UI
+
+### Local DB-backed workflow verification helper
+
+- Added `scripts/dev/verify-phase-8a1-workflows.ts` as a dev-only verification helper.
+- Purpose:
+  - verify leave, expense, and payroll workflows against real DB records and centralized workflow services
+  - verify unauthorized approval attempts are blocked
+  - capture audit-log evidence
+- This helper is not tied to production seed and is only for local verification.
+
+### Workflow verification results
+
+- Leave workflow:
+  - approved leave request status -> `APPROVED`
+  - rejected leave request status -> `REJECTED`
+  - unauthorized peon approval attempt -> blocked with `You do not have permission to perform this workflow action.`
+- Expense workflow:
+  - approved expense voucher status -> display `APPROVED`, raw status `APPROVED`
+  - rejected expense voucher status -> display `REJECTED`, raw status `CANCELLED`
+  - unauthorized peon approval attempt -> blocked with `You do not have permission to perform this workflow action.`
+- Payroll workflow:
+  - approved payroll run status -> display `APPROVED`, raw status `FINALIZED`
+  - completed payroll run status -> display `COMPLETED`, raw status `PAID`
+  - rejected payroll run status -> display `REJECTED`, raw status `CANCELLED`
+  - unauthorized peon approval attempt -> blocked with `You do not have permission to perform this workflow action.`
+
+### Audit log verification result
+
+- Verified audit rows were created for:
+  - `leave.requested`
+  - `leave.approve`
+  - `leave.reject`
+  - `expense.requested`
+  - `expense.approve`
+  - `expense.reject`
+  - `payroll.run.requested`
+  - `payroll.run.approve`
+  - `payroll.run.complete`
+  - `payroll.run.reject`
+- Audit metadata correctly captured status transitions and remarks.
+
+### Bugs found and fixed during verification
+
+- Fixed unreliable sign-out/persona switching by adding `/logout` route and switching UI sign-out links to that route.
+- Found a local payroll verification data blocker:
+  - no active staff had `salaryAmount`
+  - for local QA verification only, the helper ensures the QA accountant staff profile has a salary reference before creating payroll runs
+- Found a helper-script-only enum mismatch while testing expense workflow:
+  - corrected the dev helper to use uppercase `FeePaymentMode` enum values (`CASH`, `UPI`, `CARD`)
+
+### Commands run
+
+- `taskkill /F /IM node.exe`
+- `.\node_modules\.bin\prisma.cmd validate`
+- `.\node_modules\.bin\tsc.cmd --noEmit --incremental false`
+- `.\node_modules\.bin\next.cmd build`
+- `node .next/standalone/server.js` with local host/port env for verification
+- `.\node_modules\.bin\tsx.cmd .\scripts\dev\verify-phase-8a1-workflows.ts`
+
+### Remaining risks
+
+- Full multi-persona browser-only approval clicks were still limited by in-app browser runtime instability on longer flows, so final approval-state confirmation was completed through the centralized workflow service against the real DB.
+- Expense rejection still maps to raw `CANCELLED` because the schema has no dedicated expense `REJECTED` enum.
+- Payroll slip approval remains module-specific and is still outside the centralized workflow layer.
+
+### Phase 8A-1 status
+
+- Logout/persona switching reliability: fixed with dedicated route
+- Leave requester browser verification: completed
+- Leave/expense/payroll approval + unauthorized blocking + audit evidence: verified with real DB-backed helper
+- Phase 9 can start after approval
+
 ## Phase 7 - Advanced Operational Modules Stabilization
 
 ### Health policy cleanup result

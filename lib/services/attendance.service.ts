@@ -1,9 +1,11 @@
 import { AttendanceStatus, RoleCode, type Prisma } from "@prisma/client";
 
-import { getMonthBounds, toDayBounds, toDateInput, toMonthInput } from "@/lib/attendance";
+import { getSafeDateInput, getSafeDayBounds, getSafeMonthBounds, getSafeMonthInput } from "@/lib/attendance";
 import { db } from "@/lib/db";
 import type { SessionLike } from "@/lib/rbac/types";
 import { getLinkedStudentIdForUser, getTeacherScope } from "@/lib/rbac/scope";
+
+type TeacherScope = Awaited<ReturnType<typeof getTeacherScope>>;
 
 type AttendanceFilters = {
   schoolId: string;
@@ -11,7 +13,9 @@ type AttendanceFilters = {
   sectionId?: string;
   date?: string;
   month?: string;
+  year?: string;
   viewer?: SessionLike;
+  teacherScope?: TeacherScope | null;
 };
 
 type SaveAttendanceInput = {
@@ -84,7 +88,7 @@ async function getScopedStudents(filters: AttendanceFilters, classId: string, se
   }
 
   if ([RoleCode.TEACHER, RoleCode.HOD, RoleCode.EXAM_CONTROLLER].some((role) => viewer.roles.includes(role))) {
-    const teacherScope = await getTeacherScope(viewer);
+    const teacherScope = filters.teacherScope ?? (await getTeacherScope(viewer));
     if (!teacherScope.classIds.includes(classId) || !teacherScope.sectionIds.includes(sectionId)) {
       return [];
     }
@@ -98,13 +102,16 @@ async function getScopedStudents(filters: AttendanceFilters, classId: string, se
 
 export async function getAttendancePageData(filters: AttendanceFilters) {
   const viewer = filters.viewer;
+  const teacherScoped =
+    viewer != null &&
+    [RoleCode.TEACHER, RoleCode.HOD, RoleCode.EXAM_CONTROLLER].some((role) => viewer.roles.includes(role));
+  const teacherScope = teacherScoped ? await getTeacherScope(viewer) : null;
   let classes = await db.schoolClass.findMany({
     where: { schoolId: filters.schoolId, isArchived: false },
     orderBy: [{ displayOrder: "asc" }, { name: "asc" }]
   });
 
-  if (viewer && [RoleCode.TEACHER, RoleCode.HOD, RoleCode.EXAM_CONTROLLER].some((role) => viewer.roles.includes(role))) {
-    const teacherScope = await getTeacherScope(viewer);
+  if (teacherScope) {
     classes = classes.filter((item) => teacherScope.classIds.includes(item.id));
   }
 
@@ -118,24 +125,24 @@ export async function getAttendancePageData(filters: AttendanceFilters) {
     orderBy: { name: "asc" }
   });
 
-  if (viewer && [RoleCode.TEACHER, RoleCode.HOD, RoleCode.EXAM_CONTROLLER].some((role) => viewer.roles.includes(role))) {
-    const teacherScope = await getTeacherScope(viewer);
+  if (teacherScope) {
     sections = sections.filter((item) => teacherScope.sectionIds.includes(item.id));
   }
 
   const sectionId = filters.sectionId ?? sections[0]?.id ?? "";
-  const date = filters.date ?? toDateInput();
-  const month = filters.month ?? toMonthInput();
+  const date = getSafeDateInput(filters.date);
+  const month = getSafeMonthInput(filters.month, filters.year);
+
   const selectedClass = classes.find((item) => item.id === classId) ?? classes[0];
   const selectedSection = sections.find((item) => item.id === sectionId) ?? sections[0];
 
   const students =
     selectedClass && selectedSection
-      ? await getScopedStudents(filters, selectedClass.id, selectedSection.id)
+      ? await getScopedStudents({ ...filters, teacherScope }, selectedClass.id, selectedSection.id)
       : [];
+  const dayBounds = getSafeDayBounds(date);
+  const monthBounds = getSafeMonthBounds(month, filters.year);
 
-  const dayBounds = toDayBounds(date);
-  const monthBounds = getMonthBounds(month);
   const dayAttendances = students.length
     ? await db.attendance.findMany({
         where: {
@@ -176,6 +183,7 @@ export async function getAttendancePageData(filters: AttendanceFilters) {
   };
 }
 
+
 export async function saveAttendanceSheet(input: SaveAttendanceInput) {
   const students = await db.student.findMany({
     where: {
@@ -196,7 +204,7 @@ export async function saveAttendanceSheet(input: SaveAttendanceInput) {
   }
 
   const entryMap = new Map(input.entries.map((entry) => [entry.studentId, entry]));
-  const bounds = toDayBounds(input.date);
+  const bounds = getSafeDayBounds(input.date);
   const auditEntries: Array<{
     attendanceId: string;
     studentId: string;
